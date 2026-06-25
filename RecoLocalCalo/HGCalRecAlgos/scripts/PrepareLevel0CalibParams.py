@@ -2,12 +2,20 @@
 import os, re
 import json
 import datetime
+import subprocess
 from argparse import ArgumentParser, RawTextHelpFormatter
 import numpy as np  # type: ignore
 from typing import Union
 from multiprocessing import Pool
-import HGCalCommissioning.LocalCalibration.JSONEncoder as JS  # type: ignore
-from HGCalCommissioning.LocalCalibration.HGCalDBHelper import HGCalCalibrationsDBHelper  # type: ignore
+try:
+    import HGCalCommissioning.LocalCalibration.JSONEncoder as JS  # type: ignore
+except ModuleNotFoundError:
+    JS = None
+
+try:
+    from HGCalCommissioning.LocalCalibration.HGCalDBHelper import HGCalCalibrationsDBHelper  # type: ignore
+except ModuleNotFoundError:
+    HGCalCalibrationsDBHelper = None
 
 
 def getChannelsFrom(typecode: str) -> int:
@@ -95,6 +103,31 @@ def getCalibTemplate(dim: Union[str, int]):
     return calib_templ_dict
 
 
+
+def normalizeCalibrationInput(obj: dict) -> dict:
+    """Normalize single-module calibration JSON files to the typecode-indexed format
+    expected by buildLevel0CalibParams.
+
+    Supported input:
+      {
+        "typeCode": "...",
+        "reference": "...",
+        "timestamp": "...",
+        "payload": {...}
+      }
+
+    Output:
+      {
+        "<typeCode>": {...}
+      }
+    """
+    if isinstance(obj, dict) and "payload" in obj and isinstance(obj["payload"], dict):
+        typecode = obj.get("typeCode", obj.get("typecode", None))
+        if typecode is not None:
+            return {str(typecode): obj["payload"]}
+    return obj
+
+
 def buildLevel0CalibParams(args) -> tuple[str, dict]:
 
     typecode, input_json = args
@@ -104,9 +137,11 @@ def buildLevel0CalibParams(args) -> tuple[str, dict]:
     for k, f in input_json.items():
         if type(f) == str:
             with open(f) as jsonf:
-                data[k] = json.load(jsonf).get(typecode, {})
+                loaded = normalizeCalibrationInput(json.load(jsonf))
+                data[k] = loaded.get(typecode, {})
         else:
-            data[k] = f.get(typecode, {})
+            loaded = normalizeCalibrationInput(f)
+            data[k] = loaded.get(typecode, {})
 
     # build the calibration dict
     typecode = typecode.replace("_", "-")
@@ -114,6 +149,7 @@ def buildLevel0CalibParams(args) -> tuple[str, dict]:
     ped_calib = data.get("ped", {})
     if "Channel" in ped_calib:
         nch = len(ped_calib["Channel"])
+        level0_calib = getCalibTemplate(nch)
         level0_calib["Channel"] = ped_calib["Channel"].copy()
         level0_calib["Valid"] = ped_calib["Valid"].copy()
         level0_calib["ADC_ped"] = ped_calib["adc_ped"].copy()
@@ -205,13 +241,48 @@ def main():
         help="CSV list of typecodes to test baseline",
     )
     parser.add_argument(
-        "--nthreads", default=8, help="number of parallel jobs to spawn"
+        "--nthreads", type=int, default=8, help="number of parallel jobs to spawn"
     )
     parser.add_argument(
         "--push-to-db", action="store_true", help="push resulting JSON to Conditions DB"
     )
     parser.add_argument(
         "--mysql-env", type=str, default=None, help="Path to MySQL environment file"
+    )
+    parser.add_argument(
+        "--sqlite-output",
+        type=str,
+        default=None,
+        help="Optional output SQLite CondDB file for RecHitCalib/level0 payload",
+    )
+    parser.add_argument(
+        "--sqlite-tag",
+        type=str,
+        default="HGCalRecHitCalibration_level0",
+        help="CondDB tag name to use when --sqlite-output is provided",
+    )
+    parser.add_argument(
+        "--sqlite-record",
+        type=str,
+        default="HGCalRecHitCalibrationRcd",
+        help="CondDB record name to use when --sqlite-output is provided",
+    )
+    parser.add_argument(
+        "--sqlite-since-run",
+        type=int,
+        default=1,
+        help="IOV since run to use when writing the SQLite CondDB payload",
+    )
+    parser.add_argument(
+        "--sqlite-cfg",
+        type=str,
+        default="src/RecoLocalCalo/HGCalRecAlgos/test/HGCalRecHitCalibrationCondDB_cfg.py",
+        help="cmsRun cfg used to write the SQLite CondDB payload",
+    )
+    parser.add_argument(
+        "--no-json-output",
+        action="store_true",
+        help="Do not write the intermediate level0 JSON file when --sqlite-output is used",
     )
     args = parser.parse_args()
 
@@ -236,7 +307,8 @@ def main():
         # build calib dicts in parallel and then merge
         first_input = next(iter(input_json))
         with open(input_json[first_input]) as jsonf:
-            tasks = [(typecode, input_json) for typecode in json.load(jsonf).keys()]
+            loaded = normalizeCalibrationInput(json.load(jsonf))
+            tasks = [(typecode, input_json) for typecode in loaded.keys()]
         print(f"Launching {len(tasks)} tasks")
         with Pool(args.nthreads) as pool:
             results = pool.map(buildLevel0CalibParams, tasks)
@@ -245,12 +317,39 @@ def main():
                 (typecode, typecode_calib) for typecode, typecode_calib in results
             )
 
+    if args.push_to_db and args.no_json_output:
+        raise ValueError("--push-to-db requires a JSON output file; do not use --no-json-output with --push-to-db")
+
     # save final output
-    print(f"Writing to {args.output}")
-    JS.saveAsJson(args.output, level0_calib)
+    if args.no_json_output:
+        print("Skipping level0 JSON output file (--no-json-output)")
+    else:
+        print(f"Writing to {args.output}")
+        if JS is not None:
+            JS.saveAsJson(args.output, level0_calib)
+        else:
+            with open(args.output, "w") as jsonf:
+                json.dump(level0_calib, jsonf, indent=2)
+
+    # ---- write SQLite CondDB file if requested ----
+    if args.sqlite_output:
+        cmd = [
+            "cmsRun",
+            args.sqlite_cfg,
+            "jsonFile=-",
+            f"sqliteFile={args.sqlite_output}",
+            f"record={args.sqlite_record}",
+            f"tag={args.sqlite_tag}",
+            f"sinceRun={args.sqlite_since_run}",
+            "writeToCondDB=True",
+        ]
+        print("Writing SQLite CondDB with cmsRun: " + " ".join(cmd))
+        subprocess.run(cmd, input=json.dumps(level0_calib), text=True, check=True)
 
     # ---- push to DB if requested ----
     if args.push_to_db:
+        if HGCalCalibrationsDBHelper is None:
+            raise RuntimeError("HGCalCalibrationsDBHelper is not available in this environment")
         print("Pushing JSON to Conditions DB...")
         dbhelper = HGCalCalibrationsDBHelper(
             database="Conditions", table="conditions_test", mysql_env=args.mysql_env
