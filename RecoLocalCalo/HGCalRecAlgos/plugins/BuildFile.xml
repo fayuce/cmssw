@@ -5,28 +5,23 @@
 <use name="CondFormats/DataRecord"/>
 <use name="CondFormats/HGCalObjects"/>
 <use name="CondCore/DBOutputService"/>
+<use name="CondCore/ESSources"/>
 <use name="Geometry/HGCalMapping"/>
 <use name="RecoLocalCalo/HGCalRecAlgos"/>
+<use name="json"/>
 
-<!-- HGCal configuration plugin -->
 <library file="HGCalConfigurationESProducer.cc">
   <flags EDM_PLUGIN="1"/>
 </library>
 
-
-<!-- HGCal pedestal CondDB writer plugin -->
 <library file="HGCalPedestalDBAnalyzer.cc">
   <flags EDM_PLUGIN="1"/>
 </library>
 
-<!-- alpaka-based portable plugins -->
-<library file="alpaka/*.cc" name="RecoLocalCaloHGCalRecAlgosPluginsPortable">
-  <use name="alpaka"/>
-  <use name="json"/>
-  <use name="DataFormats/HGCalDigi"/>
-  <use name="DataFormats/Math"/>
-  <use name="HeterogeneousCore/AlpakaCore"/>
-  <use name="HeterogeneousCore/AlpakaInterface"/>
-  <flags ALPAKA_BACKENDS="1"/>
+<library file="HGCalPedestalDBReader.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalPedestalCondDBPlugin.cc">
   <flags EDM_PLUGIN="1"/>
 </library>
