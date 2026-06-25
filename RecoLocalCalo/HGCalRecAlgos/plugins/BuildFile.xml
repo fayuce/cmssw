@@ -25,3 +25,25 @@
 <library file="HGCalPedestalCondDBPlugin.cc">
   <flags EDM_PLUGIN="1"/>
 </library>
+
+<library file="HGCalRecHitCalibrationCondDBPlugin.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalRecHitCalibrationDBAnalyzer.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalRecHitCalibrationDBReader.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+
+<library name="RecoLocalCaloHGCalRecAlgosPluginsPortable" file="alpaka/*.cc">
+  <use name="alpaka"/>
+  <use name="HeterogeneousCore/AlpakaCore"/>
+  <use name="HeterogeneousCore/AlpakaInterface"/>
+  <use name="DataFormats/ForwardDetId"/>
+  <flags ALPAKA_BACKENDS="1"/>
+  <flags EDM_PLUGIN="1"/>
+</library>

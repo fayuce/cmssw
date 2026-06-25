@@ -29,7 +29,7 @@ options.register('maxmods', 8, mytype=VarParsing.varType.int,
                  info="maximum number of modules to print out")
 options.register('maxfeds', 30, mytype=VarParsing.varType.int,
                  info="maximum number of FED IDs to test")
-options.register('fedconfig', f"{configdir}/config/config_feds_hackathon.json", mytype=VarParsing.varType.int,
+options.register('fedconfig', f"{configdir}/config/config_feds_hackathon.json", mytype=VarParsing.varType.string,
                  info="Path to configuration (JSON format)")
 options.register('modconfig', f"{configdir}/config/config_econds_hackathon.json", mytype=VarParsing.varType.string,
                  info="Path to configuration (JSON format)")
@@ -42,6 +42,14 @@ options.register('energyloss',
                  f"{configdir}/../EnergyLoss/hgcal_energyloss_v16.json",
                  mytype=VarParsing.varType.string,
                  info="Path to calibration parameters (JSON format)")
+options.register('sqliteFile',
+                 'hgcal_rechit_calibration_test.db',
+                 mytype=VarParsing.varType.string,
+                 info="SQLite CondDB file with HGCalRecHitCalibrationConditions")
+options.register('calibTag',
+                 'HGCalRecHitCalibration_test_2026_06_25',
+                 mytype=VarParsing.varType.string,
+                 info="CondDB tag for HGCalRecHitCalibrationRcd")
 options.register('modules',
                  # see https://github.com/cms-data/Geometry-HGCalMapping
                  # or https://gitlab.cern.ch/hgcal-dpg/hgcal-comm/-/tree/master/Configuration/data/ModuleMaps
@@ -60,8 +68,8 @@ if options.params.startswith('/eos/'):
 if options.energyloss.startswith('/eos/'):
   options.energyloss = os.path.relpath(options.energyloss,relpath)
 if len(options.files)==0:
-  options.files=['file:/eos/cms/store/group/dpg_hgcal/comm_hgcal/psilva/hackhathon/23234.103_TTbar_14TeV+2026D94Aging3000/step2.root']
-  #options.files=['file:/eos/cms/store/group/dpg_hgcal/comm_hgcal/psilva/hackhathon/23234.103_TTbar_14TeV+2026D94Aging3000/step2.root']
+  options.files=['root://eoscms.cern.ch//eos/cms/store/group/dpg_hgcal/comm_hgcal/psilva/hackhathon/23234.103_TTbar_14TeV+2026D94Aging3000/step2.root']
+  #options.files=['root://eoscms.cern.ch//eos/cms/store/group/dpg_hgcal/comm_hgcal/psilva/hackhathon/23234.103_TTbar_14TeV+2026D94Aging3000/step2.root']
   #options.files=['file:/afs/cern.ch/user/y/yumiao/public/HGCAL_Raw_Data_Handling/Data/Digis/testFakeDigisSoA.root']
 print(f">>> Geometry:      {options.geometry!r}")
 print(f">>> Input files:   {options.files!r}")
@@ -71,6 +79,8 @@ print(f">>> SipmCell map:  {options.sipmcells!r}")
 print(f">>> FED config:    {options.fedconfig!r}")
 print(f">>> ECON-D config: {options.modconfig!r}")
 print(f">>> Calib params:  {options.params!r}")
+print(f">>> Calib SQLite:  {options.sqliteFile!r}")
+print(f">>> Calib tag:     {options.calibTag!r}")
 print(f">>> Energy loss:   {options.energyloss!r}")
 
 # PROCESS
@@ -84,6 +94,19 @@ process.load("Configuration.StandardSequences.MagneticField_cff")
 process.load("Configuration.EventContent.EventContent_cff")
 process.load("Configuration.StandardSequences.FrontierConditions_GlobalTag_cff")
 process.GlobalTag = GlobalTag(process.GlobalTag, 'auto:phase2_realistic', '')
+
+process.load("CondCore.CondDB.CondDB_cfi")
+process.CondDB.connect = cms.string("sqlite_file:" + options.sqliteFile)
+process.hgcalRecHitCalibrationCondDB = cms.ESSource(
+  "PoolDBESSource",
+  process.CondDB,
+  toGet = cms.VPSet(
+    cms.PSet(
+      record = cms.string("HGCalRecHitCalibrationRcd"),
+      tag = cms.string(options.calibTag)
+    )
+  )
+)
 
 # INPUT
 process.source = cms.Source(
@@ -121,8 +144,8 @@ customise_hgcalmapper(process, **kwargs)
 #process.load("RecoLocalCalo.HGCalRecAlgos.hgCalConfigurationESProducer_cfi")
 process.hgcalConfigESProducer = cms.ESSource( # ESProducer to load configurations for unpacker
   'HGCalConfigurationESProducer',
-  fedjson=cms.string(options.fedconfig),  # JSON with FED configuration parameters
-  modjson=cms.string(options.modconfig),  # JSON with ECON-D configuration parameters
+  fedjson=cms.FileInPath(options.fedconfig),  # JSON with FED configuration parameters
+  modjson=cms.FileInPath(options.modconfig),  # JSON with ECON-D configuration parameters
   #passthroughMode=cms.int32(0),          # ignore mismatch
   #cbHeaderMarker=cms.int32(0x5f),        # capture block
   #slinkHeaderMarker=cms.int32(0x2a),     # S-link
@@ -135,9 +158,9 @@ process.hgcalConfigESProducer = cms.ESSource( # ESProducer to load configuration
 process.load('Configuration.StandardSequences.Accelerators_cff')
 #process.load('HeterogeneousCore.AlpakaCore.ProcessAcceleratorAlpaka_cfi')
 #process.load('HeterogeneousCore.CUDACore.ProcessAcceleratorCUDA_cfi')
-process.hgcalCalibParamESProducer = cms.ESProducer( # ESProducer to load calibration parameters from JSON file, like pedestals
+process.hgcalCalibParamESProducer = cms.ESProducer( # ESProducer to load calibration parameters from CondDB/EventSetup
   'hgcalrechit::HGCalCalibrationESProducer@alpaka',
-  filename=cms.FileInPath(options.params),
+  calibSource=cms.ESInputTag(''),
   filenameEnergyLoss=cms.FileInPath(options.energyloss),
   indexSource=cms.ESInputTag('hgCalMappingESProducer',''),
   mapSource=cms.ESInputTag('hgCalMappingModuleESProducer','')
@@ -154,7 +177,7 @@ process.testHGCalRecHitESProducers = cms.EDProducer(
   maxchans=cms.int32(options.maxchans),  # maximum number of channels to print out
   maxmods=cms.int32(options.maxmods),    # maximum number of modules to print out
   maxfeds=cms.int32(options.maxfeds),    # maximum number of FED IDs to test
-  #fedjson=cms.string(options.fedconfig),  # JSON with FED configuration parameters
+  #fedjson=cms.FileInPath(options.fedconfig),  # JSON with FED configuration parameters
   fedjson=cms.string(""), # use hardcoded JSON instead
 )
 process.p = cms.Path(process.testHGCalRecHitESProducers)
