@@ -2,8 +2,7 @@
 //
 // EDAnalyzer:
 //   level0 calibration JSON -> HGCalRecHitCalibrationConditions -> SQLite CondDB
-//
-// This is the RecHit/level0 calibration analogue of HGCalPedestalDBAnalyzer.
+//// 
 
 #include "FWCore/Framework/interface/one/EDAnalyzer.h"
 #include "FWCore/Framework/interface/Event.h"
@@ -85,14 +84,14 @@ void HGCalRecHitCalibrationDBAnalyzer::fillDescriptions(edm::ConfigurationDescri
 
 void HGCalRecHitCalibrationDBAnalyzer::beginJob() {
   edm::LogInfo("HGCalRecHitCalibrationDBAnalyzer")
-      << "\n=========================================="
+      << "\n"
       << "\n  HGCal RecHit Calibration DB Analyzer"
       << "\n  jsonFile     : " << m_jsonFile
       << "\n  record       : " << m_record
       << "\n  tag          : " << m_tag
       << "\n  sinceRun     : " << m_sinceRun
       << "\n  writeToCondDB: " << (m_writeToCondDB ? "YES" : "NO (dry-run)")
-      << "\n==========================================";
+      << "\n";
 }
 
 std::vector<float> HGCalRecHitCalibrationDBAnalyzer::getFloatVector(const json& j, const std::string& key) {
@@ -224,10 +223,10 @@ HGCalRecHitCalibrationConditions HGCalRecHitCalibrationDBAnalyzer::readFromJSON(
 void HGCalRecHitCalibrationDBAnalyzer::printSummary(
     const HGCalRecHitCalibrationConditions& payload) const {
   edm::LogInfo("HGCalRecHitCalibrationDBAnalyzer")
-      << "\n=========================================="
-      << "\n  HGCal RecHit Calibration Payload Summary"
+      << "\n"
+      << "\n  Summary"
       << "\n  nModules: " << payload.nModules()
-      << "\n==========================================";
+      << "\n";
 
   for (const auto& module : payload.modules) {
     const int n = module.nChannels();
@@ -282,7 +281,7 @@ void HGCalRecHitCalibrationDBAnalyzer::endJob() {
     writeToCondDB(payload);
   } else {
     edm::LogInfo("HGCalRecHitCalibrationDBAnalyzer")
-        << "writeToCondDB=False, dry-run only.";
+        << "writeToCondDB=False.";
   }
 }
 
