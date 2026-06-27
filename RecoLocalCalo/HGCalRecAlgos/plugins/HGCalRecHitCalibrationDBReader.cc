@@ -299,6 +299,70 @@ bool HGCalRecHitCalibrationDBReader::compareWithJson(
   json input = json::parse(f);
   bool ok = true;
 
+  std::size_t modulesChecked = 0;
+  std::size_t channelsChecked = 0;
+  std::size_t validChannels = 0;
+  std::size_t intValuesCompared = 0;
+  std::size_t floatValuesCompared = 0;
+  std::size_t matrixValuesCompared = 0;
+
+  double maxRelDiff = 0.0;
+  std::string maxRelDiffLocation = "n/a";
+
+  auto updateMaxRelDiff = [&](const std::string& module,
+                              const std::string& field,
+                              const std::string& index,
+                              double dbValue,
+                              double refValue) {
+    const double denom = std::abs(refValue) > 1e-10 ? std::abs(refValue) : 1.0;
+    const double rel = std::abs(dbValue - refValue) / denom;
+    if (rel > maxRelDiff) {
+      maxRelDiff = rel;
+      maxRelDiffLocation = "module=" + module + " field=" + field + " index=" + index;
+    }
+  };
+
+  auto compareAndCountIntVector = [&](const std::string& moduleName,
+                                      const std::string& field,
+                                      const std::vector<int32_t>& db,
+                                      const std::vector<int32_t>& ref) {
+    intValuesCompared += ref.size();
+    return compareIntVector(moduleName, field, db, ref);
+  };
+
+  auto compareAndCountFloatVector = [&](const std::string& moduleName,
+                                        const std::string& field,
+                                        const std::vector<float>& db,
+                                        const std::vector<float>& ref) {
+    floatValuesCompared += ref.size();
+
+    const std::size_t nCompare = std::min(db.size(), ref.size());
+    for (std::size_t i = 0; i < nCompare; ++i) {
+      updateMaxRelDiff(moduleName, field, std::to_string(i), db[i], ref[i]);
+    }
+
+    return compareFloatVector(moduleName, field, db, ref);
+  };
+
+  auto compareAndCountFloat2DVector = [&](const std::string& moduleName,
+                                          const std::string& field,
+                                          const std::vector<std::vector<float>>& db,
+                                          const std::vector<std::vector<float>>& ref) {
+    for (const auto& row : ref) {
+      matrixValuesCompared += row.size();
+    }
+
+    const std::size_t nRows = std::min(db.size(), ref.size());
+    for (std::size_t i = 0; i < nRows; ++i) {
+      const std::size_t nCols = std::min(db[i].size(), ref[i].size());
+      for (std::size_t k = 0; k < nCols; ++k) {
+        updateMaxRelDiff(moduleName, field, "(" + std::to_string(i) + "," + std::to_string(k) + ")", db[i][k], ref[i][k]);
+      }
+    }
+
+    return compareFloat2DVector(moduleName, field, db, ref);
+  };
+
   if (cond.modules.size() != input.size()) {
     edm::LogError("HGCalRecHitCalibrationDBReader")
         << "Module count mismatch: CondDB=" << cond.modules.size()
@@ -322,30 +386,49 @@ bool HGCalRecHitCalibrationDBReader::compareWithJson(
     const auto refValid = j.at("Valid").get<std::vector<int32_t>>();
     const std::size_t n = refChannel.size();
 
-    ok &= compareIntVector(typeCode, "Channel", module->channel, refChannel);
-    ok &= compareIntVector(typeCode, "Valid", module->valid, refValid);
+    ++modulesChecked;
+    channelsChecked += n;
+    validChannels += std::accumulate(refValid.begin(), refValid.end(), 0);
 
-    ok &= compareFloatVector(typeCode, "ADC_ped", module->ADC_ped, j.at("ADC_ped").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "Noise", module->Noise, j.at("Noise").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "CM_ped", module->CM_ped, j.at("CM_ped").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "CM_slope", module->CM_slope, j.at("CM_slope").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "BXm1_slope", module->BXm1_slope, j.at("BXm1_slope").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "BXm1_ped", module->BXm1_ped, getFloatVectorOrDefault(j, "BXm1_ped", n, 0.f));
+    ok &= compareAndCountIntVector(typeCode, "Channel", module->channel, refChannel);
+    ok &= compareAndCountIntVector(typeCode, "Valid", module->valid, refValid);
 
-    ok &= compareFloatVector(typeCode, "TOTtoADC", module->TOTtoADC, j.at("TOTtoADC").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "TOT_ped", module->TOT_ped, j.at("TOT_ped").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "TOT_lin", module->TOT_lin, j.at("TOT_lin").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "TOT_P0", module->TOT_P0, j.at("TOT_P0").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "TOT_P1", module->TOT_P1, j.at("TOT_P1").get<std::vector<float>>());
-    ok &= compareFloatVector(typeCode, "TOT_P2", module->TOT_P2, j.at("TOT_P2").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "ADC_ped", module->ADC_ped, j.at("ADC_ped").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "Noise", module->Noise, j.at("Noise").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "CM_ped", module->CM_ped, j.at("CM_ped").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "CM_slope", module->CM_slope, j.at("CM_slope").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "BXm1_slope", module->BXm1_slope, j.at("BXm1_slope").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "BXm1_ped", module->BXm1_ped, getFloatVectorOrDefault(j, "BXm1_ped", n, 0.f));
 
-    ok &= compareFloat2DVector(typeCode, "TOA_CTDC", module->TOA_CTDC, getFloat2DOrDefault(j, "TOA_CTDC", n, 32, 0.f));
-    ok &= compareFloat2DVector(typeCode, "TOA_FTDC", module->TOA_FTDC, getFloat2DOrDefault(j, "TOA_FTDC", n, 8, 0.f));
-    ok &= compareFloat2DVector(typeCode, "TOA_TW", module->TOA_TW, getFloat2DOrDefault(j, "TOA_TW", n, 3, 0.f));
+    ok &= compareAndCountFloatVector(typeCode, "TOTtoADC", module->TOTtoADC, j.at("TOTtoADC").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "TOT_ped", module->TOT_ped, j.at("TOT_ped").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "TOT_lin", module->TOT_lin, j.at("TOT_lin").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "TOT_P0", module->TOT_P0, j.at("TOT_P0").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "TOT_P1", module->TOT_P1, j.at("TOT_P1").get<std::vector<float>>());
+    ok &= compareAndCountFloatVector(typeCode, "TOT_P2", module->TOT_P2, j.at("TOT_P2").get<std::vector<float>>());
 
-    ok &= compareFloatVector(typeCode, "TOAtops", module->TOAtops, getFloatVectorOrDefault(j, "TOAtops", n, 1.f));
-    ok &= compareFloatVector(typeCode, "MIPS_scale", module->MIPS_scale, j.at("MIPS_scale").get<std::vector<float>>());
+    ok &= compareAndCountFloat2DVector(typeCode, "TOA_CTDC", module->TOA_CTDC, getFloat2DOrDefault(j, "TOA_CTDC", n, 32, 0.f));
+    ok &= compareAndCountFloat2DVector(typeCode, "TOA_FTDC", module->TOA_FTDC, getFloat2DOrDefault(j, "TOA_FTDC", n, 8, 0.f));
+    ok &= compareAndCountFloat2DVector(typeCode, "TOA_TW", module->TOA_TW, getFloat2DOrDefault(j, "TOA_TW", n, 3, 0.f));
+
+    ok &= compareAndCountFloatVector(typeCode, "TOAtops", module->TOAtops, getFloatVectorOrDefault(j, "TOAtops", n, 1.f));
+    ok &= compareAndCountFloatVector(typeCode, "MIPS_scale", module->MIPS_scale, j.at("MIPS_scale").get<std::vector<float>>());
   }
+
+  edm::LogInfo("HGCalRecHitCalibrationDBReader")
+      << "\n"
+      << "\n  RecHit Calibration Closure Summary"
+      << "\n  modules checked         : " << modulesChecked
+      << "\n  channels checked        : " << channelsChecked
+      << "\n  valid channels          : " << validChannels << "/" << channelsChecked
+      << "\n  integer values compared : " << intValuesCompared
+      << "\n  float values compared   : " << floatValuesCompared
+      << "\n  2D values compared      : " << matrixValuesCompared
+      << "\n  max relative difference : " << maxRelDiff
+      << "\n  max-diff location       : " << maxRelDiffLocation
+      << "\n  tolerance               : " << tolerance_
+      << "\n  result                  : " << (ok ? "PASSED" : "FAILED")
+      << "\n";
 
   edm::LogInfo("HGCalRecHitCalibrationDBReader")
       << "Closure comparison completed: "
