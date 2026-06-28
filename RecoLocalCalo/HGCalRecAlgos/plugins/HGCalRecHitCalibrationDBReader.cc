@@ -23,6 +23,7 @@ using json = nlohmann::json;
 
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -270,14 +271,29 @@ bool HGCalRecHitCalibrationDBReader::compareFloat2DVector(
 
 bool HGCalRecHitCalibrationDBReader::compareWithJson(
     const HGCalRecHitCalibrationConditions& cond) const {
-  std::ifstream f(refJsonFile_);
-  if (!f.is_open()) {
+  json input;
+
+  try {
+    if (refJsonFile_ == "-") {
+      edm::LogInfo("HGCalRecHitCalibrationDBReader")
+          << "Reading reference RecHitCalib JSON from stdin.";
+      input = json::parse(std::cin, nullptr, true, /*ignore_comments*/ true);
+    } else {
+      std::ifstream f(refJsonFile_);
+      if (!f.is_open()) {
+        edm::LogError("HGCalRecHitCalibrationDBReader")
+            << "Cannot open reference JSON: " << refJsonFile_;
+        return false;
+      }
+      input = json::parse(f, nullptr, true, /*ignore_comments*/ true);
+    }
+  } catch (const std::exception& ex) {
     edm::LogError("HGCalRecHitCalibrationDBReader")
-        << "Cannot open reference JSON: " << refJsonFile_;
+        << "Failed to parse reference RecHitCalib JSON from '"
+        << refJsonFile_ << "': " << ex.what();
     return false;
   }
 
-  json input = json::parse(f);
   bool ok = true;
 
   std::size_t modulesChecked = 0;
