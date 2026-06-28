@@ -284,6 +284,29 @@ def main():
         action="store_true",
         help="Do not write the intermediate level0 JSON file when --sqlite-output is used",
     )
+    parser.add_argument(
+        "--run-esproducer-closure",
+        action="store_true",
+        help="After writing SQLite, run the ESProducer-based closure test using the in-memory JSON content",
+    )
+    parser.add_argument(
+        "--esproducer-closure-cfg",
+        type=str,
+        default="src/RecoLocalCalo/HGCalRecAlgos/test/HGCalRecHitCalibrationESProducerClosure_cfg.py",
+        help="cmsRun cfg used for the ESProducer-based SQLite closure test",
+    )
+    parser.add_argument(
+        "--closure-tolerance",
+        type=float,
+        default=1e-5,
+        help="Relative tolerance for the ESProducer-based closure comparison",
+    )
+    parser.add_argument(
+        "--closure-modules",
+        type=str,
+        default="Geometry/HGCalMapping/data/ModuleMaps/modulelocator_Sep2024TBv2.txt",
+        help="Module locator file passed to the ESProducer closure cfg",
+    )
     args = parser.parse_args()
 
     # parse arguments and check how may are available
@@ -320,6 +343,14 @@ def main():
     if args.push_to_db and args.no_json_output:
         raise ValueError("--push-to-db requires a JSON output file; do not use --no-json-output with --push-to-db")
 
+    if args.run_esproducer_closure and not args.sqlite_output:
+        raise ValueError("--run-esproducer-closure requires --sqlite-output")
+
+    # Temporary test aliases for closure without a modulelocator file.
+    # The default mapping may expose generic module names such as MH-F1W / ML-F2W,
+    # while the level0 payload contains serial-specific keys such as MH-F1W-CNT0137.
+    # Add one representative generic alias so the ESProducer closure can exercise
+    # SQLite -> PoolDBESSource -> EventSetup -> ESProducer -> SoA.
     # save final output
     if args.no_json_output:
         print("Skipping level0 JSON output file (--no-json-output)")
@@ -330,6 +361,9 @@ def main():
         else:
             with open(args.output, "w") as jsonf:
                 json.dump(level0_calib, jsonf, indent=2)
+
+    # Serialize once in memory. This is not written to an intermediate JSON file.
+    level0_calib_json = json.dumps(level0_calib)
 
     # ---- write SQLite CondDB file if requested ----
     if args.sqlite_output:
@@ -344,7 +378,21 @@ def main():
             "writeToCondDB=True",
         ]
         print("Writing SQLite CondDB with cmsRun: " + " ".join(cmd))
-        subprocess.run(cmd, input=json.dumps(level0_calib), text=True, check=True)
+        subprocess.run(cmd, input=level0_calib_json, text=True, check=True)
+
+    # ---- run ESProducer-based SQLite closure if requested ----
+    if args.run_esproducer_closure:
+        cmd = [
+            "cmsRun",
+            args.esproducer_closure_cfg,
+            f"sqliteFile={args.sqlite_output}",
+            f"calibTag={args.sqlite_tag}",
+            "referenceJson=-",
+            f"tolerance={args.closure_tolerance}",
+            f"modules={args.closure_modules}",
+        ]
+        print("Running ESProducer SQLite closure with cmsRun: " + " ".join(cmd))
+        subprocess.run(cmd, input=level0_calib_json, text=True, check=True)
 
     # ---- push to DB if requested ----
     if args.push_to_db:

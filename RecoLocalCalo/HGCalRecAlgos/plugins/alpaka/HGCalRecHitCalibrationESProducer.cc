@@ -174,37 +174,19 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
               << "Expected 47 layers, but got " << nlayers << " in " << filenameEnergy_.fullPath();
         const std::vector<float> energylosses = energy_data["dEdx"].get<std::vector<float>>();
 
-        std::size_t modulesVisited = 0;
-        std::size_t exactMatches = 0;
-        std::size_t patternMatches = 0;
-        std::size_t fallbackMatches = 0;
-        std::size_t unmatchedModules = 0;
 
         // loop over all module typecodes, e.g. "ML-F3PT-TX-0003"
         for (const auto& [module, ids] : moduleIndexer.typecodeMap()) {
-          ++modulesVisited;
           const auto [fedid, modid] = ids;
 
           // retrieve matching calibration payload; glob patterns are allowed in payload typeCode
           const auto* calib = findCalibrationModule(module, calibConditions);
           if (calib == nullptr) {
-            ++unmatchedModules;
             edm::LogWarning("HGCalCalibrationESProducer")
                 << "No RecHit calibration payload found for module '" << module << "'. Skipping this module.";
             continue;
           }
 
-          if (calib->typeCode == module) {
-            ++exactMatches;
-          } else if (calib->typeCode == "*") {
-            ++fallbackMatches;
-            edm::LogInfo("HGCalCalibrationESProducer")
-                << "Module '" << module << "' uses fallback '*' RecHit calibration entry.";
-          } else {
-            ++patternMatches;
-            edm::LogInfo("HGCalCalibrationESProducer")
-                << "Module '" << module << "' matched RecHit calibration pattern '" << calib->typeCode << "'.";
-          }
 
           // get dimensions
           const uint32_t imod = moduleIndexer.getIndexForModule(fedid, modid);  // dense index in module SoA
@@ -299,26 +281,8 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
 
         }  // end of loop over modules
 
-        edm::LogInfo("HGCalCalibrationESProducer")
-            << "\n"
-            << "\n  HGCal RecHit Calibration Matching Summary"
-            << "\n  modules visited      : " << modulesVisited
-            << "\n  exact matches        : " << exactMatches
-            << "\n  pattern matches      : " << patternMatches
-            << "\n  fallback '*' matches : " << fallbackMatches
-            << "\n  unmatched modules    : " << unmatchedModules
-            << "\n";
 
-        if (fallbackMatches > 0) {
-          edm::LogWarning("HGCalCalibrationESProducer")
-              << "Some modules used the fallback '*' RecHit calibration entry. "
-              << "This is allowed, but a more specific calibration entry may be needed for production.";
-        }
 
-        if (unmatchedModules > 0) {
-          edm::LogWarning("HGCalCalibrationESProducer")
-              << unmatchedModules << " module(s) had no matching RecHit calibration payload.";
-        }
 
         return product;
       }  // end of produce()
