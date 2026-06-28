@@ -6,14 +6,16 @@
 #include "FWCore/Framework/interface/one/EDAnalyzer.h"
 #include "FWCore/Framework/interface/Event.h"
 #include "FWCore/Framework/interface/EventSetup.h"
+#include "FWCore/Framework/interface/ESHandle.h"
 #include "FWCore/Framework/interface/MakerMacros.h"
 #include "FWCore/MessageLogger/interface/MessageLogger.h"
 #include "FWCore/ParameterSet/interface/ConfigurationDescriptions.h"
 #include "FWCore/ParameterSet/interface/ParameterSet.h"
 #include "FWCore/ParameterSet/interface/ParameterSetDescription.h"
 #include "FWCore/Utilities/interface/Exception.h"
+#include "FWCore/Utilities/interface/ESGetToken.h"
 
-#include "CondCore/CondDB/interface/ConnectionPool.h"
+#include "CondFormats/DataRecord/interface/HGCalRecHitCalibrationRcd.h"
 #include "CondFormats/HGCalObjects/interface/HGCalRecHitCalibrationConditions.h"
 
 #include <nlohmann/json.hpp>
@@ -64,9 +66,7 @@ private:
                                                              std::size_t width,
                                                              float value);
 
-  std::string sqliteFile_;
-  std::string tag_;
-  unsigned long long run_;
+  edm::ESGetToken<HGCalRecHitCalibrationConditions, HGCalRecHitCalibrationRcd> calibToken_;
   std::string refJsonFile_;
   double tolerance_;
   bool verbose_;
@@ -74,9 +74,7 @@ private:
 };
 
 HGCalRecHitCalibrationDBReader::HGCalRecHitCalibrationDBReader(const edm::ParameterSet& ps)
-    : sqliteFile_(ps.getParameter<std::string>("sqliteFile")),
-      tag_(ps.getParameter<std::string>("tag")),
-      run_(ps.getParameter<unsigned long long>("run")),
+    : calibToken_(esConsumes<HGCalRecHitCalibrationConditions, HGCalRecHitCalibrationRcd>()),
       refJsonFile_(ps.getParameter<std::string>("refJsonFile")),
       tolerance_(ps.getParameter<double>("tolerance")),
       verbose_(ps.getUntrackedParameter<bool>("verbose", false)),
@@ -84,9 +82,6 @@ HGCalRecHitCalibrationDBReader::HGCalRecHitCalibrationDBReader(const edm::Parame
 
 void HGCalRecHitCalibrationDBReader::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
   edm::ParameterSetDescription desc;
-  desc.add<std::string>("sqliteFile", "hgcal_rechit_calibration_test.db");
-  desc.add<std::string>("tag", "HGCalRecHitCalibration_test_2026_06_25");
-  desc.add<unsigned long long>("run", 1ULL);
   desc.add<std::string>("refJsonFile", "");
   desc.add<double>("tolerance", 1e-5);
   desc.addUntracked<bool>("verbose", false);
@@ -107,39 +102,25 @@ std::vector<std::vector<float>> HGCalRecHitCalibrationDBReader::getFloat2DOrDefa
   return j.at(key).get<std::vector<std::vector<float>>>();
 }
 
-void HGCalRecHitCalibrationDBReader::analyze(const edm::Event&, const edm::EventSetup&) {
+void HGCalRecHitCalibrationDBReader::analyze(const edm::Event&, const edm::EventSetup& iSetup) {
   if (done_)
     return;
   done_ = true;
 
-  namespace conddb = cond::persistency;
+  auto calibHandle = iSetup.getHandle(calibToken_);
 
-  conddb::ConnectionPool pool;
-  auto session = pool.createSession("sqlite_file:" + sqliteFile_);
-  session.transaction().start(true);
-
-  auto iovProxy = session.readIov(tag_);
-  auto iovs = iovProxy.selectAll();
-  auto it = iovs.find(static_cast<cond::Time_t>(run_));
-
-  if (it == iovs.end()) {
+  if (!calibHandle.isValid()) {
     throw cms::Exception("HGCalRecHitCalibrationDBReader")
-        << "No IOV found in tag '" << tag_ << "' for run=" << run_;
+        << "Failed to get HGCalRecHitCalibrationConditions from EventSetup "
+        << "using HGCalRecHitCalibrationRcd.";
   }
 
-  cond::Hash payloadId = (*it).payloadId;
-  auto conditions = session.fetchPayload<HGCalRecHitCalibrationConditions>(payloadId);
-  session.transaction().commit();
+  const auto& conditions = *calibHandle;
 
-  if (!conditions) {
-    throw cms::Exception("HGCalRecHitCalibrationDBReader")
-        << "Null payload for hash " << payloadId;
-  }
-
-  printConditions(*conditions);
+  printConditions(conditions);
 
   if (!refJsonFile_.empty()) {
-    const bool ok = compareWithJson(*conditions);
+    const bool ok = compareWithJson(conditions);
 
     edm::LogInfo("HGCalRecHitCalibrationDBReader")
         << "\n=========================================="

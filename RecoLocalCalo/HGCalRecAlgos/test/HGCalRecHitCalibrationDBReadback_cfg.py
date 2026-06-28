@@ -1,66 +1,94 @@
 import FWCore.ParameterSet.Config as cms
-import FWCore.ParameterSet.VarParsing as VarParsing
-
-options = VarParsing.VarParsing('standard')
-
-options.register('sqliteFile',
-                 'hgcal_rechit_calibration_test.db',
-                 VarParsing.VarParsing.multiplicity.singleton,
-                 VarParsing.VarParsing.varType.string,
-                 "Input SQLite CondDB file")
-
-options.register('tag',
-                 'HGCalRecHitCalibration_test_2026_06_25',
-                 VarParsing.VarParsing.multiplicity.singleton,
-                 VarParsing.VarParsing.varType.string,
-                 "CondDB tag name")
-
-options.register('run',
-                 1,
-                 VarParsing.VarParsing.multiplicity.singleton,
-                 VarParsing.VarParsing.varType.int,
-                 "IOV run value")
-
-options.register('refJson',
-                 '/eos/cms/store/group/dpg_hgcal/tb_hgcal/DPG/calibrations/SepTB2024/level0_calib_hackathon.json',
-                 VarParsing.VarParsing.multiplicity.singleton,
-                 VarParsing.VarParsing.varType.string,
-                 "Reference level0 calibration JSON")
-
-options.register('tolerance',
-                 1e-5,
-                 VarParsing.VarParsing.multiplicity.singleton,
-                 VarParsing.VarParsing.varType.float,
-                 "Relative tolerance")
-
-options.parseArguments()
+from FWCore.ParameterSet.VarParsing import VarParsing
 
 process = cms.Process("HGCalRecHitCalibrationReadback")
 
-process.MessageLogger = cms.Service(
-    "MessageLogger",
-    destinations = cms.untracked.vstring('cout'),
-    cout = cms.untracked.PSet(
-        threshold = cms.untracked.string('INFO')
-    )
+options = VarParsing("analysis")
+
+options.register(
+    "sqliteFile",
+    "hgcal_rechit_calibration_test.db",
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.string,
+    "Input SQLite CondDB file",
 )
+
+options.register(
+    "dbTag",
+    "HGCalRecHitCalibration_test",
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.string,
+    "CondDB tag for HGCal RecHit calibration payload",
+)
+
+options.register(
+    "record",
+    "HGCalRecHitCalibrationRcd",
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.string,
+    "EventSetup record name for HGCal RecHit calibration payload",
+)
+
+options.register(
+    "refJson",
+    "",
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.string,
+    "Reference level0/RecHitCalib JSON for closure comparison",
+)
+
+options.register(
+    "tolerance",
+    1e-5,
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.float,
+    "Relative tolerance for closure comparison",
+)
+
+options.register(
+    "verbose",
+    False,
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.bool,
+    "Print verbose readback information",
+)
+
+options.parseArguments()
 
 process.source = cms.Source(
-    "EmptyIOVSource",
-    timetype   = cms.string('runnumber'),
-    firstValue = cms.uint64(1),
-    lastValue  = cms.uint64(1),
-    interval   = cms.uint64(1)
+    "EmptySource",
+    firstRun=cms.untracked.uint32(1),
 )
 
-process.hgcalRecHitCalibrationDBReader = cms.EDAnalyzer(
+process.maxEvents = cms.untracked.PSet(
+    input=cms.untracked.int32(1)
+)
+
+process.load("FWCore.MessageService.MessageLogger_cfi")
+process.MessageLogger.cerr.threshold = cms.untracked.string("INFO")
+process.MessageLogger.cerr.HGCalRecHitCalibrationDBReader = cms.untracked.PSet(
+    limit=cms.untracked.int32(-1)
+)
+
+process.load("CondCore.CondDB.CondDB_cfi")
+process.CondDB.connect = cms.string("sqlite_file:" + options.sqliteFile)
+
+process.hgcalRecHitCalibrationESSource = cms.ESSource(
+    "PoolDBESSource",
+    process.CondDB,
+    toGet=cms.VPSet(
+        cms.PSet(
+            record=cms.string(options.record),
+            tag=cms.string(options.dbTag),
+        )
+    ),
+)
+
+process.reader = cms.EDAnalyzer(
     "HGCalRecHitCalibrationDBReader",
-    sqliteFile  = cms.string(str(options.sqliteFile)),
-    tag         = cms.string(str(options.tag)),
-    run         = cms.uint64(options.run),
-    refJsonFile = cms.string(str(options.refJson)),
-    tolerance   = cms.double(options.tolerance),
-    verbose     = cms.untracked.bool(False)
+    refJsonFile=cms.string(options.refJson),
+    tolerance=cms.double(options.tolerance),
+    verbose=cms.untracked.bool(options.verbose),
 )
 
-process.p = cms.Path(process.hgcalRecHitCalibrationDBReader)
+process.p = cms.Path(process.reader)

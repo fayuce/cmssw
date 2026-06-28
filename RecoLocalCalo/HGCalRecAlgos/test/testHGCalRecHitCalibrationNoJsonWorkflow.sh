@@ -144,7 +144,8 @@ echo "[3/3] Running SQLite readback closure test"
 echo "============================================================"
 cmsRun "${READBACK_CFG}" \
   sqliteFile="${SQLITE_FILE}" \
-  tag="${TAG}" \
+  dbTag="${TAG}" \
+  record=HGCalRecHitCalibrationRcd \
   refJson="${REF_JSON}"
 
 echo
