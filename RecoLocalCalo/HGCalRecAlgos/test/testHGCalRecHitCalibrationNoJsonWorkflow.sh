@@ -100,9 +100,8 @@ SQLITE_FILE="${WORKDIR}/hgcal_rechit_calibration_nojson_test.db"
 
 rm -f "${SQLITE_FILE}" "${REF_JSON}"
 
-echo "============================================================"
 echo "[1/3] Building reference level0 JSON for closure comparison"
-echo "============================================================"
+
 python3 "${SCRIPT}" \
   --ped "${PED_JSON}" \
   --output "${REF_JSON}"
@@ -117,9 +116,9 @@ echo "Reference JSON:"
 echo "  ${REF_JSON}"
 
 echo
-echo "============================================================"
+
 echo "[2/3] Writing SQLite through the no-intermediate-JSON path"
-echo "============================================================"
+
 python3 "${SCRIPT}" \
   --ped "${PED_JSON}" \
   --sqlite-output "${SQLITE_FILE}" \
@@ -139,9 +138,9 @@ echo "SQLite file:"
 echo "  ${SQLITE_FILE}"
 
 echo
-echo "============================================================"
+
 echo "[3/3] Running SQLite readback closure test"
-echo "============================================================"
+
 cmsRun "${READBACK_CFG}" \
   sqliteFile="${SQLITE_FILE}" \
   dbTag="${TAG}" \
@@ -149,9 +148,8 @@ cmsRun "${READBACK_CFG}" \
   refJson="${REF_JSON}"
 
 echo
-echo "============================================================"
 echo "No-intermediate-JSON RecHitCalib workflow validation PASSED"
-echo "============================================================"
+
 echo "Input pedestal JSON : ${PED_JSON}"
 echo "Reference level0 JSON: ${REF_JSON}"
 echo "SQLite file         : ${SQLITE_FILE}"
