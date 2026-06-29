@@ -61,6 +61,12 @@ options.register('sicells', "", mytype=VarParsing.varType.string,
                  info="Path to Si cell mapper. Absolute, or relative to CMSSW src directory")
 options.register('sipmcells', "", mytype=VarParsing.varType.string,
                  info="Path to SiPM-on-tile cell mapper. Absolute, or relative to CMSSW src directory")
+options.register('useDB',
+                 False,
+                 VarParsing.multiplicity.singleton,
+                 VarParsing.varType.bool,
+                 "Read RecHit calibration constants from CondDB/EventSetup instead of JSON")
+
 options.parseArguments()
 relpath = os.path.join(os.environ.get('CMSSW_BASE',''),"src")
 if options.params.startswith('/eos/'):
@@ -81,6 +87,7 @@ print(f">>> ECON-D config: {options.modconfig!r}")
 print(f">>> Calib params:  {options.params!r}")
 print(f">>> Calib SQLite:  {options.sqliteFile!r}")
 print(f">>> Calib tag:     {options.calibTag!r}")
+print(f">>> useDB:         {options.useDB!r}")
 print(f">>> Energy loss:   {options.energyloss!r}")
 
 # PROCESS
@@ -107,7 +114,6 @@ process.hgcalRecHitCalibrationCondDB = cms.ESSource(
     )
   )
 )
-
 # INPUT
 process.source = cms.Source(
   "PoolSource",
@@ -160,6 +166,8 @@ process.load('Configuration.StandardSequences.Accelerators_cff')
 #process.load('HeterogeneousCore.CUDACore.ProcessAcceleratorCUDA_cfi')
 process.hgcalCalibParamESProducer = cms.ESProducer( # ESProducer to load calibration parameters from CondDB/EventSetup
   'hgcalrechit::HGCalCalibrationESProducer@alpaka',
+  useDB=cms.bool(options.useDB),
+  filename=cms.FileInPath(options.params),
   calibSource=cms.ESInputTag(''),
   filenameEnergyLoss=cms.FileInPath(options.energyloss),
   indexSource=cms.ESInputTag('hgCalMappingESProducer',''),

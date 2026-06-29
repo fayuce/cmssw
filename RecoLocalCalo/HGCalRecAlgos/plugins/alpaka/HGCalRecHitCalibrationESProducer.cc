@@ -96,17 +96,31 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
     public:
       HGCalCalibrationESProducer(const edm::ParameterSet& iConfig)
           : ESProducer(iConfig),
+            useDB_(iConfig.existsAs<bool>("useDB") ? iConfig.getParameter<bool>("useDB") : false),
             filenameEnergy_(iConfig.getParameter<edm::FileInPath>("filenameEnergyLoss")) {
         auto cc = setWhatProduced(this);
         indexToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("indexSource"));
         mapToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("mapSource"));
-        calibToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("calibSource"));
+
+        if (useDB_) {
+          calibToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("calibSource"));
+        } else {
+          if (!iConfig.existsAs<edm::FileInPath>("filename")) {
+            throw cms::Exception("ConfigError")
+                << "Parameter 'filename' is required when useDB is false.";
+          }
+          filename_.emplace(iConfig.getParameter<edm::FileInPath>("filename"));
+        }
       }
 
       static void fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
         edm::ParameterSetDescription desc;
+        desc.add<bool>("useDB", false)
+            ->setComment("If true, read RecHit calibration constants from CondDB/EventSetup; otherwise read them from the JSON file");
+        desc.addOptional<edm::FileInPath>("filename")
+            ->setComment("Path to JSON file with RecHit calibration constants, used when useDB is false");
         desc.add<edm::ESInputTag>("calibSource", edm::ESInputTag(""))
-            ->setComment("Label for HGCal RecHit calibration conditions from CondDB/EventSetup");
+            ->setComment("Label for HGCal RecHit calibration conditions from CondDB/EventSetup, used when useDB is true");
         desc.add<edm::FileInPath>("filenameEnergyLoss")
             ->setComment("Path to JSON file with energy loss & thickness corrections");
         desc.add<edm::ESInputTag>("indexSource", edm::ESInputTag(""))
@@ -152,16 +166,29 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
       std::optional<hgcalrechit::HGCalCalibParamHost> produce(const HGCalModuleConfigurationRcd& iRecord) {
         auto const& moduleIndexer = iRecord.get(indexToken_);
         auto const& moduleMapper = iRecord.get(mapToken_);
-        auto const& calibConditions = iRecord.get(calibToken_);
-        edm::LogInfo("HGCalCalibrationESProducer")
-            << "produce: loaded HGCalRecHitCalibrationConditions with "
-            << calibConditions.nModules() << " module(s)";
+
+        const HGCalRecHitCalibrationConditions* calibConditions = nullptr;
+        json calib_data;
+
+        if (useDB_) {
+          auto const& conditions = iRecord.get(calibToken_);
+          calibConditions = &conditions;
+          edm::LogInfo("HGCalCalibrationESProducer")
+              << "produce: loaded HGCalRecHitCalibrationConditions with "
+              << calibConditions->nModules() << " module(s)";
+        } else {
+          edm::LogInfo("HGCalCalibrationESProducer")
+              << "produce: reading RecHit calibration constants from JSON file "
+              << filename_->fullPath();
+          std::ifstream infile(filename_->fullPath().c_str());
+          calib_data = json::parse(infile, nullptr, true, /*ignore_comments*/ true);
+        }
 
         // load dense indexing
         const uint32_t nchans = moduleIndexer.maxDataSize();  // channel-level size
         hgcalrechit::HGCalCalibParamHost product(cms::alpakatools::host(), nchans);
 
-        // load energy-loss parameters from JSON; RecHit calibration constants come from CondDB/EventSetup
+        // load energy-loss parameters from JSON
         std::ifstream infileEnergy(filenameEnergy_.fullPath().c_str());
         json energy_data = json::parse(infileEnergy, nullptr, true, /*ignore_comments*/ true);
 
@@ -179,79 +206,126 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
         for (const auto& [module, ids] : moduleIndexer.typecodeMap()) {
           const auto [fedid, modid] = ids;
 
-          // retrieve matching calibration payload; glob patterns are allowed in payload typeCode
-          const auto* calib = findCalibrationModule(module, calibConditions);
-          if (calib == nullptr) {
-            edm::LogWarning("HGCalCalibrationESProducer")
-                << "No RecHit calibration payload found for module '" << module << "'. Skipping this module.";
-            continue;
-          }
-
-
           // get dimensions
           const uint32_t imod = moduleIndexer.getIndexForModule(fedid, modid);  // dense index in module SoA
           const uint32_t offset = moduleIndexer.getIndexForModuleData(module);  // first channel index
           const uint32_t nchans = moduleIndexer.getNumChannels(module);         // number of channels in mapper
-          uint32_t nrows = calib->nChannels();                                  // number of channels in CondDB payload
+          uint32_t nrows = 0;
 
-          // check number of channels & ROCs make sense
-          if (nrows % 37 != 0) {
-            edm::LogWarning("HGCalCalibrationESProducer")
-                << "nchannels=" << nrows << ", which is not divisible by 37 (#channels per e-Rx)!";
-          }
-          if (nchans != nrows) {
-            edm::LogWarning("HGCalCalibrationESProducer")
-                << "nchannels does not match between module indexer ('" << module << "'," << nchans
-                << ") and CondDB payload ('" << calib->typeCode << "'," << nrows << ")!";
-            nrows = std::min(nrows, nchans);  // take smallest to avoid overlap
-          }
+          if (useDB_) {
+            // retrieve matching calibration payload; glob patterns are allowed in payload typeCode
+            const auto* calib = findCalibrationModule(module, *calibConditions);
+            if (calib == nullptr) {
+              edm::LogWarning("HGCalCalibrationESProducer")
+                  << "No RecHit calibration payload found for module '" << module << "'. Skipping this module.";
+              continue;
+            }
 
-          // fill calibration parameters for ADC, CM, TOT, MIPS scale, ...
-          fill_SoA_column<float>(product.view().ADC_ped(), calib->ADC_ped, offset, nrows);
-          fill_SoA_column<float>(product.view().Noise(), calib->Noise, offset, nrows);
-          fill_SoA_column<float>(product.view().CM_slope(), calib->CM_slope, offset, nrows);
-          fill_SoA_column<float>(product.view().CM_ped(), calib->CM_ped, offset, nrows);
-          fill_SoA_column<float>(product.view().BXm1_slope(), calib->BXm1_slope, offset, nrows);
-          fill_SoA_column<float>(product.view().TOTtoADC(), calib->TOTtoADC, offset, nrows);
-          fill_SoA_column<float>(product.view().TOT_ped(), calib->TOT_ped, offset, nrows);
-          fill_SoA_column<float>(product.view().TOT_lin(), calib->TOT_lin, offset, nrows);
-          fill_SoA_column<float>(product.view().TOT_P0(), calib->TOT_P0, offset, nrows);
-          fill_SoA_column<float>(product.view().TOT_P1(), calib->TOT_P1, offset, nrows);
-          fill_SoA_column<float>(product.view().TOT_P2(), calib->TOT_P2, offset, nrows);
-          fill_SoA_column<float>(product.view().MIPS_scale(), calib->MIPS_scale, offset, nrows);
+            nrows = calib->nChannels();  // number of channels in CondDB payload
 
-          std::vector<unsigned char> valid(nrows);
-          std::transform(calib->valid.begin(), calib->valid.begin() + nrows, valid.begin(),
-                         [](int32_t v) { return static_cast<unsigned char>(v); });
-          fill_SoA_column<unsigned char>(product.view().valid(), valid, offset, nrows);
+            // check number of channels & ROCs make sense
+            if (nrows % 37 != 0) {
+              edm::LogWarning("HGCalCalibrationESProducer")
+                  << "nchannels=" << nrows << ", which is not divisible by 37 (#channels per e-Rx)!";
+            }
+            if (nchans != nrows) {
+              edm::LogWarning("HGCalCalibrationESProducer")
+                  << "nchannels does not match between module indexer ('" << module << "'," << nchans
+                  << ") and CondDB payload ('" << calib->typeCode << "'," << nrows << ")!";
+              nrows = std::min(nrows, nchans);  // take smallest to avoid overlap
+            }
 
-          std::vector<std::vector<float>> defaultTOA_CTDC;
-          std::vector<std::vector<float>> defaultTOA_FTDC;
-          std::vector<std::vector<float>> defaultTOA_TW;
+            fill_SoA_column<float>(product.view().ADC_ped(), calib->ADC_ped, offset, nrows);
+            fill_SoA_column<float>(product.view().Noise(), calib->Noise, offset, nrows);
+            fill_SoA_column<float>(product.view().CM_slope(), calib->CM_slope, offset, nrows);
+            fill_SoA_column<float>(product.view().CM_ped(), calib->CM_ped, offset, nrows);
+            fill_SoA_column<float>(product.view().BXm1_slope(), calib->BXm1_slope, offset, nrows);
+            fill_SoA_column<float>(product.view().TOTtoADC(), calib->TOTtoADC, offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_ped(), calib->TOT_ped, offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_lin(), calib->TOT_lin, offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_P0(), calib->TOT_P0, offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_P1(), calib->TOT_P1, offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_P2(), calib->TOT_P2, offset, nrows);
+            fill_SoA_column<float>(product.view().MIPS_scale(), calib->MIPS_scale, offset, nrows);
 
-          const auto* TOA_CTDC = &calib->TOA_CTDC;
-          const auto* TOA_FTDC = &calib->TOA_FTDC;
-          const auto* TOA_TW = &calib->TOA_TW;
+            std::vector<unsigned char> valid(nrows);
+            std::transform(calib->valid.begin(), calib->valid.begin() + nrows, valid.begin(),
+                           [](int32_t v) { return static_cast<unsigned char>(v); });
+            fill_SoA_column<unsigned char>(product.view().valid(), valid, offset, nrows);
 
-          if (TOA_CTDC->empty()) {
-            defaultTOA_CTDC.assign(nrows, std::vector<float>(32, 0.f));
-            TOA_CTDC = &defaultTOA_CTDC;
-          }
-          if (TOA_FTDC->empty()) {
-            defaultTOA_FTDC.assign(nrows, std::vector<float>(8, 0.f));
-            TOA_FTDC = &defaultTOA_FTDC;
-          }
-          if (TOA_TW->empty()) {
-            defaultTOA_TW.assign(nrows, std::vector<float>(3, 0.f));
-            TOA_TW = &defaultTOA_TW;
-          }
+            std::vector<std::vector<float>> defaultTOA_CTDC;
+            std::vector<std::vector<float>> defaultTOA_FTDC;
+            std::vector<std::vector<float>> defaultTOA_TW;
 
-          // fill vectors for ToA correction parameters
-          for (size_t n = 0; n < nrows; n++) {
-            auto vi = product.view()[offset + n];
-            fill_SoA_eigen_row<float>(vi.TOA_CTDC(), *TOA_CTDC, n);
-            fill_SoA_eigen_row<float>(vi.TOA_FTDC(), *TOA_FTDC, n);
-            fill_SoA_eigen_row<float>(vi.TOA_TW(), *TOA_TW, n);
+            const auto* TOA_CTDC = &calib->TOA_CTDC;
+            const auto* TOA_FTDC = &calib->TOA_FTDC;
+            const auto* TOA_TW = &calib->TOA_TW;
+
+            if (TOA_CTDC->empty()) {
+              defaultTOA_CTDC.assign(nrows, std::vector<float>(32, 0.f));
+              TOA_CTDC = &defaultTOA_CTDC;
+            }
+            if (TOA_FTDC->empty()) {
+              defaultTOA_FTDC.assign(nrows, std::vector<float>(8, 0.f));
+              TOA_FTDC = &defaultTOA_FTDC;
+            }
+            if (TOA_TW->empty()) {
+              defaultTOA_TW.assign(nrows, std::vector<float>(3, 0.f));
+              TOA_TW = &defaultTOA_TW;
+            }
+
+            for (size_t n = 0; n < nrows; n++) {
+              auto vi = product.view()[offset + n];
+              fill_SoA_eigen_row<float>(vi.TOA_CTDC(), *TOA_CTDC, n);
+              fill_SoA_eigen_row<float>(vi.TOA_FTDC(), *TOA_FTDC, n);
+              fill_SoA_eigen_row<float>(vi.TOA_TW(), *TOA_TW, n);
+            }
+          } else {
+            // Backward-compatible JSON path
+            const auto modkey = search_modkey(module, calib_data, filename_->fullPath());
+            auto calib_data_ = calib_data[modkey];
+
+            const auto firstkey = calib_data_.begin().key();
+            nrows = calib_data_[firstkey].size();  // number of channels in JSON
+
+            if (nrows % 37 != 0) {
+              edm::LogWarning("HGCalCalibrationESProducer")
+                  << "nchannels=" << nrows << ", which is not divisible by 37 (#channels per e-Rx)!";
+            }
+            if (nchans != nrows) {
+              edm::LogWarning("HGCalCalibrationESProducer")
+                  << "nchannels does not match between module indexer ('" << module << "'," << nchans
+                  << ") and JSON payload ('" << modkey << "'," << nrows << ")!";
+              nrows = std::min(nrows, nchans);  // take smallest to avoid overlap
+            }
+
+            fill_SoA_column<float>(product.view().ADC_ped(), calib_data_["ADC_ped"], offset, nrows);
+            fill_SoA_column<float>(product.view().Noise(), calib_data_["Noise"], offset, nrows);
+            fill_SoA_column<float>(product.view().CM_slope(), calib_data_["CM_slope"], offset, nrows);
+            fill_SoA_column<float>(product.view().CM_ped(), calib_data_["CM_ped"], offset, nrows);
+            fill_SoA_column<float>(product.view().BXm1_slope(), calib_data_["BXm1_slope"], offset, nrows);
+            fill_SoA_column<float>(product.view().TOTtoADC(), calib_data_["TOTtoADC"], offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_ped(), calib_data_["TOT_ped"], offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_lin(), calib_data_["TOT_lin"], offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_P0(), calib_data_["TOT_P0"], offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_P1(), calib_data_["TOT_P1"], offset, nrows);
+            fill_SoA_column<float>(product.view().TOT_P2(), calib_data_["TOT_P2"], offset, nrows);
+            fill_SoA_column<float>(product.view().MIPS_scale(), calib_data_["MIPS_scale"], offset, nrows);
+            fill_SoA_column<unsigned char>(product.view().valid(), calib_data_["Valid"], offset, nrows);
+
+            if (calib_data_.find("TOA_CTDC") == calib_data_.end())
+              calib_data_["TOA_CTDC"] = std::vector<std::vector<float>>(nrows, std::vector<float>(32, 0.));
+            if (calib_data_.find("TOA_FTDC") == calib_data_.end())
+              calib_data_["TOA_FTDC"] = std::vector<std::vector<float>>(nrows, std::vector<float>(8, 0.));
+            if (calib_data_.find("TOA_TW") == calib_data_.end())
+              calib_data_["TOA_TW"] = std::vector<std::vector<float>>(nrows, std::vector<float>(3, 0.));
+
+            for (size_t n = 0; n < nrows; n++) {
+              auto vi = product.view()[offset + n];
+              fill_SoA_eigen_row<float>(vi.TOA_CTDC(), calib_data_["TOA_CTDC"], n);
+              fill_SoA_eigen_row<float>(vi.TOA_FTDC(), calib_data_["TOA_FTDC"], n);
+              fill_SoA_eigen_row<float>(vi.TOA_TW(), calib_data_["TOA_TW"], n);
+            }
           }
 
           // energy loss of absorption layers that sandwich the sensors is provided already averaged
@@ -291,6 +365,8 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
       edm::ESGetToken<HGCalMappingModuleIndexer, HGCalElectronicsMappingRcd> indexToken_;
       edm::ESGetToken<hgcal::HGCalMappingModuleParamHost, HGCalElectronicsMappingRcd> mapToken_;
       edm::ESGetToken<HGCalRecHitCalibrationConditions, HGCalRecHitCalibrationRcd> calibToken_;
+      const bool useDB_;
+      std::optional<edm::FileInPath> filename_;
       const edm::FileInPath filenameEnergy_;
     };
 
