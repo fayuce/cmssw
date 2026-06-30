@@ -21,9 +21,10 @@
 #include "FWCore/Utilities/interface/mplVector.h"
 #include "CondFormats/DataRecord/interface/HGCalElectronicsMappingRcd.h"
 #include "CondFormats/DataRecord/interface/HGCalRecHitCalibrationRcd.h"
+#include "CondFormats/DataRecord/interface/HGCalEnergyLossRcd.h"
 
 class HGCalModuleConfigurationRcd
     : public edm::eventsetup::DependentRecordImplementation<HGCalModuleConfigurationRcd,
-                                                            edm::mpl::Vector<HGCalElectronicsMappingRcd, HGCalRecHitCalibrationRcd> > {};
+                                                            edm::mpl::Vector<HGCalElectronicsMappingRcd, HGCalRecHitCalibrationRcd, HGCalEnergyLossRcd> > {};
 
 #endif

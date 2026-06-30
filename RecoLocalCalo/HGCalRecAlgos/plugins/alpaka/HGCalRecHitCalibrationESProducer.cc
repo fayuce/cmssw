@@ -17,11 +17,13 @@
 // includes for HGCal, calibration, and configuration parameters
 #include "CondFormats/HGCalObjects/interface/HGCalMappingModuleIndexer.h"
 #include "CondFormats/HGCalObjects/interface/HGCalRecHitCalibrationConditions.h"
+#include "CondFormats/HGCalObjects/interface/HGCalEnergyLossConditions.h"
 #include "CondFormats/HGCalObjects/interface/HGCalCalibrationParameterHost.h"
 #include "CondFormats/HGCalObjects/interface/HGCalMappingParameterHost.h"
 #include "CondFormats/HGCalObjects/interface/alpaka/HGCalCalibrationParameterDevice.h"
 #include "CondFormats/DataRecord/interface/HGCalElectronicsMappingRcd.h"
 #include "CondFormats/DataRecord/interface/HGCalRecHitCalibrationRcd.h"
+#include "CondFormats/DataRecord/interface/HGCalEnergyLossRcd.h"
 #include "CondFormats/DataRecord/interface/HGCalModuleConfigurationRcd.h"  // depends on HGCalElectronicsMappingRcd
 #include "DataFormats/ForwardDetId/interface/HGCSiliconDetId.h"            // for HGCSiliconDetId::waferType
 #include "RecoLocalCalo/HGCalRecAlgos/interface/HGCalESProducerTools.h"    // for json, search_modkey
@@ -96,20 +98,25 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
     public:
       HGCalCalibrationESProducer(const edm::ParameterSet& iConfig)
           : ESProducer(iConfig),
-            useDB_(iConfig.existsAs<bool>("useDB") ? iConfig.getParameter<bool>("useDB") : false),
-            filenameEnergy_(iConfig.getParameter<edm::FileInPath>("filenameEnergyLoss")) {
+            useDB_(iConfig.existsAs<bool>("useDB") ? iConfig.getParameter<bool>("useDB") : false) {
         auto cc = setWhatProduced(this);
         indexToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("indexSource"));
         mapToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("mapSource"));
 
         if (useDB_) {
           calibToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("calibSource"));
+          energyLossToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("energyLossSource"));
         } else {
           if (!iConfig.existsAs<edm::FileInPath>("filename")) {
             throw cms::Exception("ConfigError")
                 << "Parameter 'filename' is required when useDB is false.";
           }
+          if (!iConfig.existsAs<edm::FileInPath>("filenameEnergyLoss")) {
+            throw cms::Exception("ConfigError")
+                << "Parameter 'filenameEnergyLoss' is required when useDB is false.";
+          }
           filename_.emplace(iConfig.getParameter<edm::FileInPath>("filename"));
+          filenameEnergy_.emplace(iConfig.getParameter<edm::FileInPath>("filenameEnergyLoss"));
         }
       }
 
@@ -121,8 +128,10 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
             ->setComment("Path to JSON file with RecHit calibration constants, used when useDB is false");
         desc.add<edm::ESInputTag>("calibSource", edm::ESInputTag(""))
             ->setComment("Label for HGCal RecHit calibration conditions from CondDB/EventSetup, used when useDB is true");
-        desc.add<edm::FileInPath>("filenameEnergyLoss")
-            ->setComment("Path to JSON file with energy loss & thickness corrections");
+        desc.add<edm::ESInputTag>("energyLossSource", edm::ESInputTag(""))
+            ->setComment("Label for HGCal EnergyLoss conditions from CondDB/EventSetup, used when useDB is true");
+        desc.addOptional<edm::FileInPath>("filenameEnergyLoss")
+            ->setComment("Path to JSON file with energy loss & thickness corrections, used when useDB is false");
         desc.add<edm::ESInputTag>("indexSource", edm::ESInputTag(""))
             ->setComment("Label for module indexer to set SoA size");
         desc.add<edm::ESInputTag>("mapSource", edm::ESInputTag(""))
@@ -188,18 +197,53 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
         const uint32_t nchans = moduleIndexer.maxDataSize();  // channel-level size
         hgcalrechit::HGCalCalibParamHost product(cms::alpakatools::host(), nchans);
 
-        // load energy-loss parameters from JSON
-        std::ifstream infileEnergy(filenameEnergy_.fullPath().c_str());
-        json energy_data = json::parse(infileEnergy, nullptr, true, /*ignore_comments*/ true);
+        // load energy-loss parameters
+        std::vector<float> energylosses;
+        std::vector<float> sfThicknessSi;
+        float sfThicknessSiPM = 0.f;
+        std::string energyLossSourceName;
 
-        // check keys
-        const std::vector<std::string> energy_keys = {"dEdx", "SF_thickness_Si", "SF_thickness_SiPM"};
-        check_keys(energy_data, energy_keys, filenameEnergy_.fullPath());
-        const float nlayers = energy_data["dEdx"].size();  // number of absorber layers
-        if (nlayers != 47)                                 // TODO: retrieve from nlayers from Geometry
+        if (useDB_) {
+          auto const& energyLossConditions = iRecord.get(energyLossToken_);
+
+          energylosses = energyLossConditions.dEdx;
+          sfThicknessSi = energyLossConditions.SF_thickness_Si;
+
+          if (energyLossConditions.SF_thickness_SiPM.empty()) {
+            throw cms::Exception("ConfigError")
+                << "HGCalEnergyLossConditions has empty SF_thickness_SiPM vector.";
+          }
+
+          sfThicknessSiPM = energyLossConditions.SF_thickness_SiPM[0];
+          energyLossSourceName = "HGCalEnergyLossConditions";
+
+          edm::LogInfo("HGCalCalibrationESProducer")
+              << "produce: loaded HGCalEnergyLossConditions with "
+              << energyLossConditions.nLayers() << " dEdx layer entries";
+        } else {
+          std::ifstream infileEnergy(filenameEnergy_->fullPath().c_str());
+          json energy_data = json::parse(infileEnergy, nullptr, true, /*ignore_comments*/ true);
+
+          const std::vector<std::string> energy_keys = {"dEdx", "SF_thickness_Si", "SF_thickness_SiPM"};
+          check_keys(energy_data, energy_keys, filenameEnergy_->fullPath());
+
+          energylosses = energy_data["dEdx"].get<std::vector<float>>();
+          sfThicknessSi = energy_data["SF_thickness_Si"].get<std::vector<float>>();
+
+          const auto sfThicknessSiPMVec = energy_data["SF_thickness_SiPM"].get<std::vector<float>>();
+          if (sfThicknessSiPMVec.empty()) {
+            throw cms::Exception("ConfigError")
+                << "EnergyLoss JSON has empty SF_thickness_SiPM vector in " << filenameEnergy_->fullPath();
+          }
+
+          sfThicknessSiPM = sfThicknessSiPMVec[0];
+          energyLossSourceName = filenameEnergy_->fullPath();
+        }
+
+        const float nlayers = energylosses.size();  // number of absorber layers
+        if (nlayers != 47)                          // TODO: retrieve nlayers from Geometry
           edm::LogError("HGCalCalibrationESProducer")
-              << "Expected 47 layers, but got " << nlayers << " in " << filenameEnergy_.fullPath();
-        const std::vector<float> energylosses = energy_data["dEdx"].get<std::vector<float>>();
+              << "Expected 47 layers, but got " << nlayers << " in " << energyLossSourceName;
 
 
         // loop over all module typecodes, e.g. "ML-F3PT-TX-0003"
@@ -339,10 +383,10 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
           const int celltype = moduleMapper.view().celltype()[imod];
           const uint32_t detid = moduleMapper.view().detid()[imod];
           if (isSiPM)  // scintillator
-            sf_from_config = energy_data["SF_thickness_SiPM"][0];
+            sf_from_config = sfThicknessSiPM;
           else  // Si module
             sf_from_config =
-                getThicknessCorrection(energy_data["SF_thickness_Si"], detid, celltype, filenameEnergy_.fullPath());
+                getThicknessCorrection(sfThicknessSi, detid, celltype, energyLossSourceName);
           edm::LogInfo("HGCalCalibrationESProducer")
               << "layer = " << layer << ", celltype = " << celltype << ", isSiPM = " << isSiPM << ", dEdx = " << dEdx
               << ", sf_from_config = " << sf_from_config << std::endl;
@@ -365,9 +409,10 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
       edm::ESGetToken<HGCalMappingModuleIndexer, HGCalElectronicsMappingRcd> indexToken_;
       edm::ESGetToken<hgcal::HGCalMappingModuleParamHost, HGCalElectronicsMappingRcd> mapToken_;
       edm::ESGetToken<HGCalRecHitCalibrationConditions, HGCalRecHitCalibrationRcd> calibToken_;
+      edm::ESGetToken<HGCalEnergyLossConditions, HGCalEnergyLossRcd> energyLossToken_;
       const bool useDB_;
       std::optional<edm::FileInPath> filename_;
-      const edm::FileInPath filenameEnergy_;
+      std::optional<edm::FileInPath> filenameEnergy_;
     };
 
   }  // namespace hgcalrechit

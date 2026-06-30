@@ -26,6 +26,21 @@
   <flags EDM_PLUGIN="1"/>
 </library>
 
+
+<library file="HGCalEnergyLossCondDBPlugin.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+
+<library file="HGCalEnergyLossDBReader.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+
+<library file="HGCalEnergyLossDBAnalyzer.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
 <library file="HGCalRecHitCalibrationCondDBPlugin.cc">
   <flags EDM_PLUGIN="1"/>
 </library>

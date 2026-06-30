@@ -67,6 +67,19 @@ options.register('useDB',
                  VarParsing.varType.bool,
                  "Read RecHit calibration constants from CondDB/EventSetup instead of JSON")
 
+
+options.register('energyLossSqliteFile',
+                 'hgcal_energy_loss_v16.db',
+                 VarParsing.multiplicity.singleton,
+                 VarParsing.varType.string,
+                 'Input SQLite file for HGCal EnergyLoss conditions')
+
+options.register('energyLossTag',
+                 'HGCalEnergyLoss_v16',
+                 VarParsing.multiplicity.singleton,
+                 VarParsing.varType.string,
+                 'CondDB tag for HGCal EnergyLoss conditions')
+
 options.parseArguments()
 relpath = os.path.join(os.environ.get('CMSSW_BASE',''),"src")
 if options.params.startswith('/eos/'):
@@ -169,6 +182,7 @@ process.hgcalCalibParamESProducer = cms.ESProducer( # ESProducer to load calibra
   useDB=cms.bool(options.useDB),
   filename=cms.FileInPath(options.params),
   calibSource=cms.ESInputTag(''),
+  energyLossSource=cms.ESInputTag(""),
   filenameEnergyLoss=cms.FileInPath(options.energyloss),
   indexSource=cms.ESInputTag('hgCalMappingESProducer',''),
   mapSource=cms.ESInputTag('hgCalMappingModuleESProducer','')
@@ -202,3 +216,23 @@ process.output = cms.OutputModule(
 )
 process.output_path = cms.EndPath(process.output)
 
+
+
+# Separate EnergyLoss CondDB source.
+# This is intentionally independent from the RecHit calibration SQLite/tag.
+if options.useDB:
+    from CondCore.CondDB.CondDB_cfi import CondDB as EnergyLossCondDB
+
+    process.HGCalEnergyLossDBESSource = cms.ESSource(
+        "PoolDBESSource",
+        EnergyLossCondDB.clone(connect=cms.string(f"sqlite_file:{options.energyLossSqliteFile}")),
+        toGet=cms.VPSet(
+            cms.PSet(
+                record=cms.string("HGCalEnergyLossRcd"),
+                tag=cms.string(options.energyLossTag)
+            )
+        )
+    )
+
+    print(f">>> EnergyLoss SQLite: {options.energyLossSqliteFile!r}")
+    print(f">>> EnergyLoss tag:    {options.energyLossTag!r}")
