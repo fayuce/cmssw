@@ -68,10 +68,18 @@
 </library>
 
 <library file="HGCalConfigurationCondDBPlugin.cc">
+
+<library file="HGCalConfigurationTemplateCondDBPlugin.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
   <flags EDM_PLUGIN="1"/>
 </library>
 
 <library file="HGCalConfigurationDBAnalyzer.cc">
+
+<library file="HGCalConfigurationTemplateDBAnalyzer.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
   <flags EDM_PLUGIN="1"/>
 </library>
 
@@ -80,6 +88,10 @@
 </library>
 
 <library file="HGCalTriggerConfigurationCondDBPlugin.cc">
+
+<library file="HGCalTriggerConfigurationTemplateCondDBPlugin.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
   <flags EDM_PLUGIN="1"/>
 </library>
 
@@ -88,6 +100,10 @@
 </library>
 
 <library file="HGCalTriggerConfigurationDBAnalyzer.cc">
+
+<library file="HGCalTriggerConfigurationTemplateDBAnalyzer.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
   <flags EDM_PLUGIN="1"/>
 </library>
 
@@ -98,5 +114,14 @@
 
 
 <library file="HGCalTriggerConfigurationESTest.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalConfigurationESTest.cc">
+  <use name="FWCore/Framework"/>
+  <use name="FWCore/PluginManager"/>
+  <use name="FWCore/ParameterSet"/>
+  <use name="CondFormats/HGCalObjects"/>
+  <use name="CondFormats/DataRecord"/>
   <flags EDM_PLUGIN="1"/>
 </library>

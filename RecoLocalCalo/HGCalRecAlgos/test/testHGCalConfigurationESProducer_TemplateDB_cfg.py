@@ -4,22 +4,22 @@ from FWCore.ParameterSet.VarParsing import VarParsing
 options = VarParsing("analysis")
 
 options.register("sqliteFile",
-                 "hgcal_trigger_template.db",
+                 "hgcal_config_template.db",
                  VarParsing.multiplicity.singleton,
                  VarParsing.varType.string,
-                 "Input SQLite file containing HGCalTriggerConfigurationTemplateConditions")
+                 "Input SQLite file containing HGCalConfigurationTemplateConditions")
 
 options.register("condTag",
-                 "HGCalTriggerConfigurationTemplate_v1",
+                 "HGCalConfigurationTemplate_v1",
                  VarParsing.multiplicity.singleton,
                  VarParsing.varType.string,
-                 "CondDB tag for HGCalTriggerConfigurationTemplateConditions")
+                 "CondDB tag for HGCalConfigurationTemplateConditions")
 
 options.register("record",
-                 "HGCalTriggerConfigurationTemplateRcd",
+                 "HGCalConfigurationTemplateRcd",
                  VarParsing.multiplicity.singleton,
                  VarParsing.varType.string,
-                 "CondDB record for HGCalTriggerConfigurationTemplateConditions")
+                 "CondDB record for HGCalConfigurationTemplateConditions")
 
 options.register("modules",
                  "Geometry/HGCalMapping/data/ModuleMaps/modulelocator_Sep2024TBv2.txt",
@@ -47,7 +47,7 @@ options.register("geometry",
 
 options.parseArguments()
 
-process = cms.Process("HGCalTriggerConfigurationTemplateDBRuntimeTest")
+process = cms.Process("HGCalConfigurationTemplateDBRuntimeTest")
 
 process.source = cms.Source("EmptySource",
     firstRun = cms.untracked.uint32(1)
@@ -74,7 +74,7 @@ customise_hgcalmapper(process, **kwargs)
 
 from CondCore.CondDB.CondDB_cfi import CondDB
 
-process.hgcalTriggerConfigurationTemplateDB = cms.ESSource(
+process.hgcalConfigurationTemplateDB = cms.ESSource(
     "PoolDBESSource",
     CondDB.clone(connect=cms.string(f"sqlite_file:{options.sqliteFile}")),
     toGet=cms.VPSet(
@@ -85,19 +85,24 @@ process.hgcalTriggerConfigurationTemplateDB = cms.ESSource(
     )
 )
 
-process.hgCalTriggerConfigurationESProducer = cms.ESProducer(
-    "HGCalTriggerConfigurationESProducer",
+process.hgCalConfigurationESProducer = cms.ESSource(
+    "HGCalConfigurationESProducer",
     useDB=cms.bool(False),
     configurationMode=cms.string("templatedDB"),
     templateSource=cms.ESInputTag(""),
-    indexSource=cms.ESInputTag("hgCalMappingTriggerESProducer", "")
+    indexSource=cms.ESInputTag("hgCalMappingESProducer", ""),
+    bePassthroughMode=cms.int32(-1),
+    cbHeaderMarker=cms.int32(-1),
+    slinkHeaderMarker=cms.int32(-1),
+    econdHeaderMarker=cms.int32(-1),
+    charMode=cms.int32(-1)
 )
 
-process.testHGCalTriggerConfiguration = cms.EDAnalyzer(
-    "HGCalTriggerConfigurationESTest"
+process.testHGCalConfiguration = cms.EDAnalyzer(
+    "HGCalConfigurationESTest"
 )
 
-process.p = cms.Path(process.testHGCalTriggerConfiguration)
+process.p = cms.Path(process.testHGCalConfiguration)
 
 print(f">>> Template SQLite: {options.sqliteFile!r}")
 print(f">>> Template Record: {options.record!r}")

@@ -9,12 +9,16 @@
 #include "FWCore/MessageLogger/interface/MessageLogger.h"
 #include "FWCore/ParameterSet/interface/FileInPath.h"
 #include "FWCore/ParameterSet/interface/ParameterSet.h"
+#include "FWCore/ParameterSet/interface/ConfigurationDescriptions.h"
+#include "FWCore/ParameterSet/interface/ParameterSetDescription.h"
+#include "FWCore/Utilities/interface/Exception.h"
 
 #include "CondFormats/HGCalObjects/interface/HGCalConfiguration.h"
+#include "CondFormats/HGCalObjects/interface/HGCalConfigurationTemplateConditions.h"
 #include "CondFormats/HGCalObjects/interface/HGCalMappingModuleIndexer.h"
 #include "CondFormats/DataRecord/interface/HGCalElectronicsMappingRcd.h"
 #include "CondFormats/DataRecord/interface/HGCalModuleConfigurationRcd.h"  // depends on HGCalElectronicsMappingRcd
-#include "CondFormats/DataRecord/interface/HGCalConfigurationRcd.h"
+#include "CondFormats/DataRecord/interface/HGCalConfigurationTemplateRcd.h"
 #include "RecoLocalCalo/HGCalRecAlgos/interface/HGCalESProducerTools.h"    // for json, search_modkey, search_fedkey
 
 #include <string>   // for std::to_string
@@ -27,7 +31,11 @@
 class HGCalConfigurationESProducer : public edm::ESProducer, public edm::EventSetupRecordIntervalFinder {
 public:
   explicit HGCalConfigurationESProducer(const edm::ParameterSet& iConfig)
-      : useDB_(iConfig.getParameter<bool>("useDB")) {
+      : useDB_(iConfig.existsAs<bool>("useDB") ? iConfig.getParameter<bool>("useDB") : false) {
+    configurationMode_ = iConfig.existsAs<std::string>("configurationMode")
+                             ? iConfig.getParameter<std::string>("configurationMode")
+                             : (useDB_ ? "templatedDB" : "json");
+
     if (iConfig.exists("bePassthroughMode"))
       bePassthroughMode_ = iConfig.getParameter<int32_t>("bePassthroughMode");
     if (iConfig.exists("cbHeaderMarker"))
@@ -41,20 +49,30 @@ public:
 
     auto cc = setWhatProduced(this);
 
-    if (useDB_) {
-      configToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("configSource"));
-    } else {
+    if (configurationMode_ == "templatedDB") {
+      const auto templateSource = iConfig.existsAs<edm::ESInputTag>("templateSource")
+                                      ? iConfig.getParameter<edm::ESInputTag>("templateSource")
+                                      : edm::ESInputTag("");
+      templateConfigToken_ = cc.consumes(templateSource);
+      indexToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("indexSource"));
+    } else if (configurationMode_ == "json") {
       fedjson_.emplace(iConfig.getParameter<edm::FileInPath>("fedjson"));
       modjson_.emplace(iConfig.getParameter<edm::FileInPath>("modjson"));
       indexToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("indexSource"));
+    } else {
+      throw cms::Exception("Configuration")
+          << "Unsupported HGCalConfigurationESProducer configurationMode = " << configurationMode_
+          << ". Allowed values are: json, templatedDB.";
     }
   }
 
   static void fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
     edm::ParameterSetDescription desc;
-    desc.add<bool>("useDB", false)->setComment("Read expanded HGCalConfiguration from CondDB/EventSetup");
-    desc.add<edm::ESInputTag>("configSource", edm::ESInputTag(""))
-        ->setComment("Label for HGCalConfiguration payload from CondDB");
+    desc.add<bool>("useDB", false)->setComment("Legacy switch: if true and configurationMode is not set, use templatedDB");
+    desc.add<std::string>("configurationMode", "json")
+        ->setComment("Configuration source mode: json or templatedDB");
+    desc.add<edm::ESInputTag>("templateSource", edm::ESInputTag(""))
+        ->setComment("Label for HGCalConfigurationTemplateConditions payload from CondDB");
     desc.add<edm::ESInputTag>("indexSource", edm::ESInputTag(""))
         ->setComment("Label for module indexer to set SoA size");
     desc.addOptional<edm::FileInPath>("fedjson")->setComment("JSON file with FED configuration parameters");
@@ -82,23 +100,47 @@ public:
   }
 
   std::unique_ptr<HGCalConfiguration> produce(const HGCalModuleConfigurationRcd& iRecord) {
-    if (useDB_) {
-      const auto& config = iRecord.get(configToken_);
-      edm::LogInfo("HGCalConfigurationESProducer") << "produce: loaded HGCalConfiguration from CondDB: " << config;
-      return std::make_unique<HGCalConfiguration>(config);
-    }
-
     auto const& moduleMap = iRecord.get(indexToken_);
-    edm::LogInfo("HGCalConfigurationESProducer")
-        << "produce: fedjson_=" << fedjson_->fullPath() << ",\n         modjson_=" << modjson_->fullPath();
 
-    // retrieve values from custom JSON format (see HGCalCalibrationESProducer)
-    std::string fedjsonurl(fedjson_->fullPath());
-    std::string modjsonurl(modjson_->fullPath());
-    std::ifstream fedfile(fedjsonurl);
-    std::ifstream modfile(modjsonurl);
-    const json fed_config_data = json::parse(fedfile, nullptr, true, /*ignore_comments*/ true);
-    const json mod_config_data = json::parse(modfile, nullptr, true, /*ignore_comments*/ true);
+    std::string fedjsonurl;
+    std::string modjsonurl;
+    json fed_config_data;
+    json mod_config_data;
+
+    if (configurationMode_ == "templatedDB") {
+      const auto& payload = iRecord.get(templateConfigToken_);
+
+      fedjsonurl = "HGCalConfigurationTemplateConditions::fedJson";
+      modjsonurl = "HGCalConfigurationTemplateConditions::modJson";
+
+      edm::LogInfo("HGCalConfigurationESProducer")
+          << "produce: loaded HGCalConfigurationTemplateConditions from CondDB"
+          << ", fedJsonSize=" << payload.fedJson.size()
+          << ", modJsonSize=" << payload.modJson.size();
+
+      fed_config_data = json::parse(payload.fedJson, nullptr, true, /*ignore_comments*/ true);
+      mod_config_data = json::parse(payload.modJson, nullptr, true, /*ignore_comments*/ true);
+    } else {
+      fedjsonurl = fedjson_->fullPath();
+      modjsonurl = modjson_->fullPath();
+
+      edm::LogInfo("HGCalConfigurationESProducer")
+          << "produce: fedjson_=" << fedjsonurl
+          << ", modjson_=" << modjsonurl;
+
+      std::ifstream fedfile(fedjsonurl);
+      std::ifstream modfile(modjsonurl);
+
+      if (!fedfile.is_open()) {
+        throw cms::Exception("Configuration") << "Cannot open FED JSON file: " << fedjsonurl;
+      }
+      if (!modfile.is_open()) {
+        throw cms::Exception("Configuration") << "Cannot open module JSON file: " << modjsonurl;
+      }
+
+      fed_config_data = json::parse(fedfile, nullptr, true, /*ignore_comments*/ true);
+      mod_config_data = json::parse(modfile, nullptr, true, /*ignore_comments*/ true);
+    }
 
     // consistency check
     uint32_t nfeds = moduleMap.numFEDs();
@@ -213,8 +255,9 @@ private:
   }
 
   edm::ESGetToken<HGCalMappingModuleIndexer, HGCalElectronicsMappingRcd> indexToken_;
-  edm::ESGetToken<HGCalConfiguration, HGCalConfigurationRcd> configToken_;
+  edm::ESGetToken<HGCalConfigurationTemplateConditions, HGCalConfigurationTemplateRcd> templateConfigToken_;
   const bool useDB_;
+  std::string configurationMode_;
   std::optional<edm::FileInPath> fedjson_;  // JSON file
   std::optional<edm::FileInPath> modjson_;  // JSON file
   int32_t bePassthroughMode_ = -1;          // for manual override

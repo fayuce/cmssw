@@ -90,4 +90,10 @@
   <class name="std::vector<uint16_t>"/>
   <class name="std::vector<uint32_t>"/>
   <class name="std::map<uint8_t,std::vector<uint8_t> >"/>
+  <class name="HGCalConfigurationTemplateConditions" ClassVersion="10">
+    <version ClassVersion="10" checksum="1935541214"/>
+  </class>
+  <class name="HGCalTriggerConfigurationTemplateConditions" ClassVersion="10">
+    <version ClassVersion="10" checksum="1370341600"/>
+  </class>
 </lcgdict>
