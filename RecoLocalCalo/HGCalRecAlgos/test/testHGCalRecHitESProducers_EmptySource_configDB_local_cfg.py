@@ -98,19 +98,6 @@ options.register('econdConfigTag',
                  VarParsing.varType.string,
                  'CondDB tag for HGCal ECOND configuration conditions')
 
-
-options.register('configurationSqliteFile',
-                 'hgcal_configuration_v1.db',
-                 VarParsing.multiplicity.singleton,
-                 VarParsing.varType.string,
-                 'Input SQLite file for expanded HGCalConfiguration conditions')
-
-options.register('configurationTag',
-                 'HGCalConfiguration_v1',
-                 VarParsing.multiplicity.singleton,
-                 VarParsing.varType.string,
-                 'CondDB tag for expanded HGCalConfiguration conditions')
-
 options.parseArguments()
 relpath = os.path.join(os.environ.get('CMSSW_BASE',''),"src")
 if options.params.startswith('/eos/'):
@@ -195,7 +182,8 @@ customise_hgcalmapper(process, **kwargs)
 process.hgcalConfigESProducer = cms.ESSource( # ESProducer to load configurations for unpacker
   'HGCalConfigurationESProducer',
   useDB=cms.bool(options.useDB),
-  configSource=cms.ESInputTag(""),
+  fedConfigSource=cms.ESInputTag(""),
+  econdConfigSource=cms.ESInputTag(""),
   fedjson=cms.FileInPath(options.fedconfig),  # JSON with FED configuration parameters
   modjson=cms.FileInPath(options.modconfig),  # JSON with ECON-D configuration parameters
   #passthroughMode=cms.int32(0),          # ignore mismatch
@@ -254,20 +242,6 @@ process.output_path = cms.EndPath(process.output)
 # Separate EnergyLoss CondDB source.
 # This is intentionally independent from the RecHit calibration SQLite/tag.
 if options.useDB:
-
-    from CondCore.CondDB.CondDB_cfi import CondDB as ConfigurationCondDB
-
-    process.HGCalConfigurationDBESSource = cms.ESSource(
-        "PoolDBESSource",
-        ConfigurationCondDB.clone(connect=cms.string(f"sqlite_file:{options.configurationSqliteFile}")),
-        toGet=cms.VPSet(
-            cms.PSet(record=cms.string("HGCalConfigurationRcd"),
-                     tag=cms.string(options.configurationTag))
-        )
-    )
-
-    print(f">>> Configuration SQLite: {options.configurationSqliteFile!r}")
-    print(f">>> Configuration tag:    {options.configurationTag!r}")
     from CondCore.CondDB.CondDB_cfi import CondDB as EnergyLossCondDB
 
     process.HGCalEnergyLossDBESSource = cms.ESSource(
@@ -304,3 +278,17 @@ if options.useDB:
     print(f">>> Config SQLite: {options.configSqliteFile!r}")
     print(f">>> FED config tag:   {options.fedConfigTag!r}")
     print(f">>> ECOND config tag: {options.econdConfigTag!r}")
+
+print(">>> Overriding input source with EmptySource for local useDB=True config DB smoke test")
+process.source = cms.Source("EmptySource")
+process.maxEvents = cms.untracked.PSet(input=cms.untracked.int32(1))
+
+print(">>> Disabling PoolOutputModule for local useDB=True config DB smoke test")
+
+if hasattr(process, "output_path"):
+    del process.output_path
+
+if hasattr(process, "output"):
+    del process.output
+
+process.schedule = cms.Schedule(process.p)

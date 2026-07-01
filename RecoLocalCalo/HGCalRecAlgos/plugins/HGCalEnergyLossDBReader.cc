@@ -85,15 +85,9 @@ void HGCalEnergyLossDBReader::analyze(const edm::Event&, const edm::EventSetup& 
     const bool ok = compareWithJson(conditions);
 
     edm::LogInfo("HGCalEnergyLossDBReader")
-        << "\n=========================================="
-        << "\n  EnergyLoss Closure Result: "
-        << (ok ? "*** PASSED ***" : "*** FAILED ***")
-        << "\n==========================================";
+        << "EnergyLoss closure result: " << (ok ? "passed" : "failed");
 
-    std::cout << "\n=========================================="
-              << "\n  EnergyLoss Closure Result: "
-              << (ok ? "*** PASSED ***" : "*** FAILED ***")
-              << "\n==========================================\n";
+    std::cout << "EnergyLoss closure result: " << (ok ? "passed" : "failed") << std::endl;
 
     if (!ok) {
       throw cms::Exception("ClosureTestFailed")
@@ -108,21 +102,18 @@ void HGCalEnergyLossDBReader::printConditions(const HGCalEnergyLossConditions& c
   };
 
   edm::LogInfo("HGCalEnergyLossDBReader")
-      << "\n=========================================="
-      << "\n  HGCal EnergyLoss Readback"
-      << "\n  dEdx entries             : " << cond.dEdx.size()
-      << "\n  SF_thickness_Si entries  : " << cond.SF_thickness_Si.size()
-      << "\n  SF_thickness_SiPM entries: " << cond.SF_thickness_SiPM.size()
-      << "\n  mean dEdx                : " << mean(cond.dEdx)
-      << "\n==========================================";
+      << "Read HGCalEnergyLossConditions: "
+      << "dEdx entries=" << cond.dEdx.size()
+      << ", SF_thickness_Si entries=" << cond.SF_thickness_Si.size()
+      << ", SF_thickness_SiPM entries=" << cond.SF_thickness_SiPM.size()
+      << ", mean dEdx=" << mean(cond.dEdx);
 
-  std::cout << "\n=========================================="
-            << "\n  HGCal EnergyLoss Readback"
-            << "\n  dEdx entries             : " << cond.dEdx.size()
-            << "\n  SF_thickness_Si entries  : " << cond.SF_thickness_Si.size()
-            << "\n  SF_thickness_SiPM entries: " << cond.SF_thickness_SiPM.size()
-            << "\n  mean dEdx                : " << mean(cond.dEdx)
-            << "\n==========================================\n";
+  std::cout << "Read HGCalEnergyLossConditions: "
+            << "dEdx entries=" << cond.dEdx.size()
+            << ", SF_thickness_Si entries=" << cond.SF_thickness_Si.size()
+            << ", SF_thickness_SiPM entries=" << cond.SF_thickness_SiPM.size()
+            << ", mean dEdx=" << mean(cond.dEdx)
+            << std::endl;
 
   if (verbose_ && !cond.dEdx.empty()) {
     edm::LogInfo("HGCalEnergyLossDBReader")

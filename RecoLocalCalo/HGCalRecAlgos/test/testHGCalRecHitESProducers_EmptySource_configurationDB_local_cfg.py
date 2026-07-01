@@ -304,3 +304,17 @@ if options.useDB:
     print(f">>> Config SQLite: {options.configSqliteFile!r}")
     print(f">>> FED config tag:   {options.fedConfigTag!r}")
     print(f">>> ECOND config tag: {options.econdConfigTag!r}")
+
+print(">>> Overriding input source with EmptySource for local useDB=True HGCalConfiguration DB smoke test")
+process.source = cms.Source("EmptySource")
+process.maxEvents = cms.untracked.PSet(input=cms.untracked.int32(1))
+
+print(">>> Disabling PoolOutputModule for local HGCalConfiguration DB smoke test")
+
+if hasattr(process, "output_path"):
+    del process.output_path
+
+if hasattr(process, "output"):
+    del process.output
+
+process.schedule = cms.Schedule(process.p)

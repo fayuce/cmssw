@@ -22,9 +22,11 @@
 #include "CondFormats/DataRecord/interface/HGCalElectronicsMappingRcd.h"
 #include "CondFormats/DataRecord/interface/HGCalRecHitCalibrationRcd.h"
 #include "CondFormats/DataRecord/interface/HGCalEnergyLossRcd.h"
+#include "CondFormats/DataRecord/interface/HGCalConfigurationRcd.h"
+#include "CondFormats/DataRecord/interface/HGCalTriggerConfigurationRcd.h"
 
 class HGCalModuleConfigurationRcd
     : public edm::eventsetup::DependentRecordImplementation<HGCalModuleConfigurationRcd,
-                                                            edm::mpl::Vector<HGCalElectronicsMappingRcd, HGCalRecHitCalibrationRcd, HGCalEnergyLossRcd> > {};
+                                                            edm::mpl::Vector<HGCalElectronicsMappingRcd, HGCalRecHitCalibrationRcd, HGCalEnergyLossRcd, HGCalConfigurationRcd, HGCalTriggerConfigurationRcd> > {};
 
 #endif

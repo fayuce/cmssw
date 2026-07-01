@@ -1,0 +1,7 @@
+{
+    "*": {
+        "mismatchPassthroughMode": 1,
+        "cbHeaderMarker": "0x7f",
+        "slinkHeaderMarker": "0x55"
+    }
+}

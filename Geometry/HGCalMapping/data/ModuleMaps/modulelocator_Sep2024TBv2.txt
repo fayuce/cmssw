@@ -1,0 +1,4 @@
+plane u v irot typecode econdidx captureblock captureblockidx slinkidx fedid zside
+1 5 4 3 ML-F3WX-IH0016 0 0 0 0 0 -1
+1 5 5 1 ML-F3WX-IH0017 1 0 0 0 0 -1
+1 5 6 3 ML-F3WX-IH0014 2 0 0 0 0 -1

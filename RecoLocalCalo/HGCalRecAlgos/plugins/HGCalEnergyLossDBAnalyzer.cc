@@ -174,20 +174,16 @@ void HGCalEnergyLossDBAnalyzer::writeToCondDB(const HGCalEnergyLossConditions& p
   }
 
   edm::LogInfo("HGCalEnergyLossDBAnalyzer")
-      << "\n"
-      << "\n  CondDB write OK:"
-      << "\n  record   : " << m_record
-      << "\n  tag      : " << m_tag
-      << "\n  sinceRun : " << m_sinceRun
-      << "\n  nLayers  : " << payload.nLayers()
-      << "\n";
+      << "Wrote HGCalEnergyLossConditions to CondDB: record=" << m_record
+      << ", tag=" << m_tag
+      << ", sinceRun=" << m_sinceRun
+      << ", nLayers=" << payload.nLayers();
 
-  std::cout << "\n  CondDB write OK:"
-            << "\n  record   : " << m_record
-            << "\n  tag      : " << m_tag
-            << "\n  sinceRun : " << m_sinceRun
-            << "\n  nLayers  : " << payload.nLayers()
-            << "\n";
+  std::cout << "Wrote HGCalEnergyLossConditions to CondDB: record=" << m_record
+            << ", tag=" << m_tag
+            << ", sinceRun=" << m_sinceRun
+            << ", nLayers=" << payload.nLayers()
+            << std::endl;
 }
 
 void HGCalEnergyLossDBAnalyzer::endJob() {

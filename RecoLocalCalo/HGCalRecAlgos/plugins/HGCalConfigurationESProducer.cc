@@ -14,10 +14,12 @@
 #include "CondFormats/HGCalObjects/interface/HGCalMappingModuleIndexer.h"
 #include "CondFormats/DataRecord/interface/HGCalElectronicsMappingRcd.h"
 #include "CondFormats/DataRecord/interface/HGCalModuleConfigurationRcd.h"  // depends on HGCalElectronicsMappingRcd
+#include "CondFormats/DataRecord/interface/HGCalConfigurationRcd.h"
 #include "RecoLocalCalo/HGCalRecAlgos/interface/HGCalESProducerTools.h"    // for json, search_modkey, search_fedkey
 
 #include <string>   // for std::to_string
 #include <fstream>  // needed to read json file with std::ifstream
+#include <optional>
 
 /**
  * @short ESProducer to parse HGCAL electronics configuration from JSON file
@@ -25,9 +27,7 @@
 class HGCalConfigurationESProducer : public edm::ESProducer, public edm::EventSetupRecordIntervalFinder {
 public:
   explicit HGCalConfigurationESProducer(const edm::ParameterSet& iConfig)
-      :  //edm::ESProducer(iConfig),
-        fedjson_(iConfig.getParameter<edm::FileInPath>("fedjson")),
-        modjson_(iConfig.getParameter<edm::FileInPath>("modjson")) {
+      : useDB_(iConfig.getParameter<bool>("useDB")) {
     if (iConfig.exists("bePassthroughMode"))
       bePassthroughMode_ = iConfig.getParameter<int32_t>("bePassthroughMode");
     if (iConfig.exists("cbHeaderMarker"))
@@ -38,16 +38,27 @@ public:
       econdHeaderMarker_ = iConfig.getParameter<int32_t>("econdHeaderMarker");
     if (iConfig.exists("charMode"))
       charMode_ = iConfig.getParameter<int32_t>("charMode");
+
     auto cc = setWhatProduced(this);
-    indexToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("indexSource"));
+
+    if (useDB_) {
+      configToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("configSource"));
+    } else {
+      fedjson_.emplace(iConfig.getParameter<edm::FileInPath>("fedjson"));
+      modjson_.emplace(iConfig.getParameter<edm::FileInPath>("modjson"));
+      indexToken_ = cc.consumes(iConfig.getParameter<edm::ESInputTag>("indexSource"));
+    }
   }
 
   static void fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
     edm::ParameterSetDescription desc;
+    desc.add<bool>("useDB", false)->setComment("Read expanded HGCalConfiguration from CondDB/EventSetup");
+    desc.add<edm::ESInputTag>("configSource", edm::ESInputTag(""))
+        ->setComment("Label for HGCalConfiguration payload from CondDB");
     desc.add<edm::ESInputTag>("indexSource", edm::ESInputTag(""))
         ->setComment("Label for module indexer to set SoA size");
-    desc.add<edm::FileInPath>("fedjson")->setComment("JSON file with FED configuration parameters");
-    desc.add<edm::FileInPath>("modjson")->setComment("JSON file with ECOND configuration parameters");
+    desc.addOptional<edm::FileInPath>("fedjson")->setComment("JSON file with FED configuration parameters");
+    desc.addOptional<edm::FileInPath>("modjson")->setComment("JSON file with ECOND configuration parameters");
     desc.addOptional<int32_t>("bePassthroughMode", -1)
         ->setComment("Manual override for mismatch passthrough mode in the BE");
     desc.addOptional<int32_t>("cbHeaderMarker", -1)
@@ -71,13 +82,19 @@ public:
   }
 
   std::unique_ptr<HGCalConfiguration> produce(const HGCalModuleConfigurationRcd& iRecord) {
+    if (useDB_) {
+      const auto& config = iRecord.get(configToken_);
+      edm::LogInfo("HGCalConfigurationESProducer") << "produce: loaded HGCalConfiguration from CondDB: " << config;
+      return std::make_unique<HGCalConfiguration>(config);
+    }
+
     auto const& moduleMap = iRecord.get(indexToken_);
     edm::LogInfo("HGCalConfigurationESProducer")
-        << "produce: fedjson_=" << fedjson_ << ",\n         modjson_=" << modjson_;
+        << "produce: fedjson_=" << fedjson_->fullPath() << ",\n         modjson_=" << modjson_->fullPath();
 
     // retrieve values from custom JSON format (see HGCalCalibrationESProducer)
-    std::string fedjsonurl(fedjson_.fullPath());
-    std::string modjsonurl(modjson_.fullPath());
+    std::string fedjsonurl(fedjson_->fullPath());
+    std::string modjsonurl(modjson_->fullPath());
     std::ifstream fedfile(fedjsonurl);
     std::ifstream modfile(modjsonurl);
     const json fed_config_data = json::parse(fedfile, nullptr, true, /*ignore_comments*/ true);
@@ -178,11 +195,11 @@ public:
     // consistency check
     if (ntot_mods != moduleMap.maxModulesCount())
       edm::LogWarning("HGCalConfigurationESProducer")
-          << "Total number of ECON-D modules found in JSON file " << modjson_ << " (" << ntot_mods
+          << "Total number of ECON-D modules found in JSON file " << modjsonurl << " (" << ntot_mods
           << ") does not match indexer (" << moduleMap.maxModulesCount() << ")";
     if (ntot_rocs != moduleMap.maxERxSize())
       edm::LogWarning("HGCalConfigurationESProducer")
-          << "Total number of eRx half-ROCs found in JSON file " << modjson_ << " (" << ntot_rocs
+          << "Total number of eRx half-ROCs found in JSON file " << modjsonurl << " (" << ntot_rocs
           << ") does not match indexer (" << moduleMap.maxERxSize() << ")";
 
     return config_;
@@ -196,9 +213,11 @@ private:
   }
 
   edm::ESGetToken<HGCalMappingModuleIndexer, HGCalElectronicsMappingRcd> indexToken_;
-  const edm::FileInPath fedjson_;   // JSON file
-  const edm::FileInPath modjson_;   // JSON file
-  int32_t bePassthroughMode_ = -1;  // for manual override
+  edm::ESGetToken<HGCalConfiguration, HGCalConfigurationRcd> configToken_;
+  const bool useDB_;
+  std::optional<edm::FileInPath> fedjson_;  // JSON file
+  std::optional<edm::FileInPath> modjson_;  // JSON file
+  int32_t bePassthroughMode_ = -1;          // for manual override
   int32_t cbHeaderMarker_ = -1;     // for manual override
   int32_t slinkHeaderMarker_ = -1;  // for manual override
   int32_t econdHeaderMarker_ = -1;  // for manual override

@@ -27,6 +27,10 @@
 </library>
 
 
+
+
+
+
 <library file="HGCalEnergyLossCondDBPlugin.cc">
   <flags EDM_PLUGIN="1"/>
 </library>
@@ -60,5 +64,39 @@
   <use name="HeterogeneousCore/AlpakaInterface"/>
   <use name="DataFormats/ForwardDetId"/>
   <flags ALPAKA_BACKENDS="1"/>
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalConfigurationCondDBPlugin.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalConfigurationDBAnalyzer.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalConfigurationDBReader.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalTriggerConfigurationCondDBPlugin.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalTriggerConfigurationESProducer.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+<library file="HGCalTriggerConfigurationDBAnalyzer.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+
+<library file="HGCalTriggerConfigurationDBReader.cc">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
+
+<library file="HGCalTriggerConfigurationESTest.cc">
   <flags EDM_PLUGIN="1"/>
 </library>
