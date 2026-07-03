@@ -102,45 +102,171 @@ public:
   std::unique_ptr<HGCalConfiguration> produce(const HGCalModuleConfigurationRcd& iRecord) {
     auto const& moduleMap = iRecord.get(indexToken_);
 
+    if (configurationMode_ == "templatedDB") {
+      const auto& payload = iRecord.get(templateConfigToken_);
+
+      edm::LogInfo("HGCalConfigurationESProducer")
+          << "produce: loaded HGCalConfigurationTemplateConditions C++ payload from CondDB"
+          << ", nFeds=" << payload.feds.size()
+          << ", nModuleTemplates=" << payload.modules.size();
+
+      uint32_t ntot_mods = 0, ntot_rocs = 0;
+
+      auto config_ = std::make_unique<HGCalConfiguration>();
+      config_->feds.resize(moduleMap.maxFEDSize());
+
+      for (std::size_t fedid = 0; fedid < moduleMap.maxFEDSize(); ++fedid) {
+        if (moduleMap.fedReadoutSequences()[fedid].readoutTypes_.empty()) {
+          continue;
+        }
+
+        auto fedIt = std::find_if(payload.feds.begin(), payload.feds.end(),
+                                  [fedid](const HGCalFedConfigTemplate& fed) {
+                                    return !fed.isWildcard && fed.fedId == fedid;
+                                  });
+
+        if (fedIt == payload.feds.end()) {
+          fedIt = std::find_if(payload.feds.begin(), payload.feds.end(),
+                               [](const HGCalFedConfigTemplate& fed) {
+                                 return fed.isWildcard;
+                               });
+        }
+
+        if (fedIt == payload.feds.end()) {
+          throw cms::Exception("Configuration")
+              << "Cannot find FED " << fedid
+              << " in HGCalConfigurationTemplateConditions payload";
+        }
+
+        const auto& fedTemplate = *fedIt;
+
+        HGCalFedConfig fed;
+        fed.mismatchPassthroughMode =
+            getint(fedTemplate.mismatchPassthroughMode, bePassthroughMode_);
+        fed.cbHeaderMarker =
+            gethex(fedTemplate.cbHeaderMarker, cbHeaderMarker_);
+        fed.slinkHeaderMarker =
+            gethex(fedTemplate.slinkHeaderMarker, slinkHeaderMarker_);
+
+        for (const auto& [typecode, ids] : moduleMap.typecodeMap()) {
+          auto [fedid_, imod] = ids;
+          if (fedid_ != fedid) {
+            continue;
+          }
+
+          ++ntot_mods;
+
+          auto modIt = payload.modules.find(typecode);
+
+          if (modIt == payload.modules.end()) {
+            for (auto it = payload.modules.begin(); it != payload.modules.end(); ++it) {
+              const auto& key = it->first;
+              const auto starPos = key.find('*');
+
+              if (starPos == std::string::npos) {
+                continue;
+              }
+
+              const auto prefix = key.substr(0, starPos);
+              if (typecode.rfind(prefix, 0) == 0) {
+                modIt = it;
+                break;
+              }
+            }
+          }
+
+          if (modIt == payload.modules.end()) {
+            throw cms::Exception("Configuration")
+                << "Cannot find module typecode " << typecode
+                << " in HGCalConfigurationTemplateConditions payload";
+          }
+
+          const auto& modTemplate = modIt->second;
+
+          if (imod >= fed.econds.size()) {
+            fed.econds.resize(imod + 1);
+          }
+
+          HGCalECONDConfig mod;
+          mod.headerMarker = gethex(modTemplate.headerMarker, econdHeaderMarker_);
+
+          uint32_t nrocs = moduleMap.getNumERxs(fedid, imod);
+          uint32_t nrocs2 = modTemplate.calibrationSC.size();
+
+          if (nrocs != nrocs2) {
+            edm::LogWarning("HGCalConfigurationESProducer")
+                << "Number of eRx ROCs for ECON-D " << typecode
+                << " in HGCalConfigurationTemplateConditions (" << nrocs2
+                << ") does not match indexer for fedid=" << fedid
+                << " imod=" << imod << " (" << nrocs << ")";
+          }
+
+          mod.rocs.resize(nrocs);
+          mod.enabledErx = (0b1 << nrocs) - 0b1;
+
+          if (modTemplate.hasEnabledErx) {
+            mod.enabledErx = getint(modTemplate.enabledErx, -1);
+          }
+
+          for (uint32_t iroc = 0; iroc < nrocs; ++iroc) {
+            ++ntot_rocs;
+
+            HGCalROCConfig roc;
+            roc.charMode = getint(modTemplate.calibrationSC[iroc], charMode_);
+            roc.muxMode = -1;
+
+            if (modTemplate.hasMultiPlex && iroc < modTemplate.multiPlex.size()) {
+              roc.muxMode = getint(modTemplate.multiPlex[iroc], -1);
+            }
+
+            mod.rocs[iroc] = roc;
+          }
+
+          fed.econds[imod] = mod;
+        }
+
+        config_->feds[fedid] = fed;
+      }
+
+      if (ntot_mods != moduleMap.maxModulesCount()) {
+        edm::LogWarning("HGCalConfigurationESProducer")
+            << "Total number of ECON-D modules found in HGCalConfigurationTemplateConditions ("
+            << ntot_mods << ") does not match indexer (" << moduleMap.maxModulesCount() << ")";
+      }
+
+      if (ntot_rocs != moduleMap.maxERxSize()) {
+        edm::LogWarning("HGCalConfigurationESProducer")
+            << "Total number of eRx half-ROCs found in HGCalConfigurationTemplateConditions ("
+            << ntot_rocs << ") does not match indexer (" << moduleMap.maxERxSize() << ")";
+      }
+
+      return config_;
+    }
+
     std::string fedjsonurl;
     std::string modjsonurl;
     json fed_config_data;
     json mod_config_data;
 
-    if (configurationMode_ == "templatedDB") {
-      const auto& payload = iRecord.get(templateConfigToken_);
+    fedjsonurl = fedjson_->fullPath();
+    modjsonurl = modjson_->fullPath();
 
-      fedjsonurl = "HGCalConfigurationTemplateConditions::fedJson";
-      modjsonurl = "HGCalConfigurationTemplateConditions::modJson";
+    edm::LogInfo("HGCalConfigurationESProducer")
+        << "produce: fedjson_=" << fedjsonurl
+        << ", modjson_=" << modjsonurl;
 
-      edm::LogInfo("HGCalConfigurationESProducer")
-          << "produce: loaded HGCalConfigurationTemplateConditions from CondDB"
-          << ", fedJsonSize=" << payload.fedJson.size()
-          << ", modJsonSize=" << payload.modJson.size();
+    std::ifstream fedfile(fedjsonurl);
+    std::ifstream modfile(modjsonurl);
 
-      fed_config_data = json::parse(payload.fedJson, nullptr, true, /*ignore_comments*/ true);
-      mod_config_data = json::parse(payload.modJson, nullptr, true, /*ignore_comments*/ true);
-    } else {
-      fedjsonurl = fedjson_->fullPath();
-      modjsonurl = modjson_->fullPath();
-
-      edm::LogInfo("HGCalConfigurationESProducer")
-          << "produce: fedjson_=" << fedjsonurl
-          << ", modjson_=" << modjsonurl;
-
-      std::ifstream fedfile(fedjsonurl);
-      std::ifstream modfile(modjsonurl);
-
-      if (!fedfile.is_open()) {
-        throw cms::Exception("Configuration") << "Cannot open FED JSON file: " << fedjsonurl;
-      }
-      if (!modfile.is_open()) {
-        throw cms::Exception("Configuration") << "Cannot open module JSON file: " << modjsonurl;
-      }
-
-      fed_config_data = json::parse(fedfile, nullptr, true, /*ignore_comments*/ true);
-      mod_config_data = json::parse(modfile, nullptr, true, /*ignore_comments*/ true);
+    if (!fedfile.is_open()) {
+      throw cms::Exception("Configuration") << "Cannot open FED JSON file: " << fedjsonurl;
     }
+    if (!modfile.is_open()) {
+      throw cms::Exception("Configuration") << "Cannot open module JSON file: " << modjsonurl;
+    }
+
+    fed_config_data = json::parse(fedfile, nullptr, true, true);
+    mod_config_data = json::parse(modfile, nullptr, true, true);
 
     // consistency check
     uint32_t nfeds = moduleMap.numFEDs();

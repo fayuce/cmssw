@@ -90,10 +90,42 @@
   <class name="std::vector<uint16_t>"/>
   <class name="std::vector<uint32_t>"/>
   <class name="std::map<uint8_t,std::vector<uint8_t> >"/>
-  <class name="HGCalConfigurationTemplateConditions" ClassVersion="10">
+  <class name="HGCalROCConfigTemplate" ClassVersion="11">
+   <version ClassVersion="11" checksum="2201234219"/>
+    <version ClassVersion="10" checksum="0"/>
+  </class>
+  <class name="HGCalECONDConfigTemplate" ClassVersion="11">
+   <version ClassVersion="11" checksum="3309789159"/>
+    <version ClassVersion="10" checksum="0"/>
+  </class>
+  <class name="HGCalFedConfigTemplate" ClassVersion="11">
+   <version ClassVersion="11" checksum="801692876"/>
+    <version ClassVersion="10" checksum="0"/>
+  </class>
+  <class name="std::vector<HGCalFedConfigTemplate>"/>
+  <class name="std::map<std::string,HGCalECONDConfigTemplate>"/>
+  <class name="HGCalConfigurationTemplateConditions" ClassVersion="11">
+   <version ClassVersion="11" checksum="1565131240"/>
     <version ClassVersion="10" checksum="1935541214"/>
   </class>
-  <class name="HGCalTriggerConfigurationTemplateConditions" ClassVersion="10">
+  <class name="HGCalTriggerECONTTemplate" ClassVersion="11">
+   <version ClassVersion="11" checksum="954562686"/>
+    <version ClassVersion="10" checksum="0"/>
+  </class>
+  <class name="HGCalTriggerModuleTemplate" ClassVersion="11">
+   <version ClassVersion="11" checksum="2165021896"/>
+    <version ClassVersion="10" checksum="0"/>
+  </class>
+  <class name="HGCalTriggerFedTemplate" ClassVersion="12">
+   <version ClassVersion="12" checksum="494149223"/>
+   <version ClassVersion="11" checksum="1044424125"/>
+    <version ClassVersion="10" checksum="0"/>
+  </class>
+  <class name="std::vector<HGCalTriggerECONTTemplate>"/>
+  <class name="std::vector<HGCalTriggerFedTemplate>"/>
+  <class name="std::map<std::string,HGCalTriggerModuleTemplate>"/>
+  <class name="HGCalTriggerConfigurationTemplateConditions" ClassVersion="11">
+   <version ClassVersion="11" checksum="1088710079"/>
     <version ClassVersion="10" checksum="1370341600"/>
   </class>
 </lcgdict>

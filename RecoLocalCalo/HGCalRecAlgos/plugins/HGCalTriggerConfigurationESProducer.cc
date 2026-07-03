@@ -23,6 +23,8 @@
 
 #include "RecoLocalCalo/HGCalRecAlgos/interface/HGCalESProducerTools.h"
 
+#include <algorithm>
+#include <algorithm>
 #include <fstream>
 #include <optional>
 #include <regex>
@@ -73,44 +75,183 @@ public:
   std::unique_ptr<HGCalTriggerConfiguration> produce(const HGCalModuleConfigurationRcd& iRecord) {
     auto const& moduleMap = iRecord.get(indexToken_);
 
-    std::string fedjsonurl;
-    std::string modjsonurl;
-    json fed_config_data;
-    json mod_config_data;
-
     if (configurationMode_ == "templatedDB") {
       const auto& payload = iRecord.get(templateConfigToken_);
 
-      fedjsonurl = "HGCalTriggerConfigurationTemplateConditions::fedJson";
-      modjsonurl = "HGCalTriggerConfigurationTemplateConditions::modJson";
-
       edm::LogInfo("HGCalTriggerConfigurationESProducer")
-          << "produce: loaded HGCalTriggerConfigurationTemplateConditions from CondDB"
-          << ", fedJsonSize=" << payload.fedJson.size()
-          << ", modJsonSize=" << payload.modJson.size();
+          << "produce: loaded HGCalTriggerConfigurationTemplateConditions C++ payload from CondDB"
+          << ", nFeds=" << payload.feds.size()
+          << ", nModuleTemplates=" << payload.modules.size();
 
-      fed_config_data = json::parse(payload.fedJson, nullptr, true, true);
-      mod_config_data = json::parse(payload.modJson, nullptr, true, true);
-    } else {
-      edm::LogInfo("HGCalTriggerConfigurationESProducer")
-          << "produce: fedjson=" << fedjson_->fullPath() << ", modjson=" << modjson_->fullPath();
+      auto config = std::make_unique<HGCalTriggerConfiguration>();
+      config->feds.resize(moduleMap.maxFEDSize());
 
-      fedjsonurl = fedjson_->fullPath();
-      modjsonurl = modjson_->fullPath();
+      for (const auto& tfed : moduleMap.fedReadoutSequences()) {
+        if (tfed.readoutTypes_.empty()) {
+          continue;
+        }
 
-      std::ifstream fedfile(fedjsonurl);
-      std::ifstream modfile(modjsonurl);
+        const auto fedid = tfed.id;
 
-      if (!fedfile.is_open()) {
-        throw cms::Exception("Configuration") << "Cannot open FED JSON file: " << fedjsonurl;
+        auto fedIt = std::find_if(payload.feds.begin(), payload.feds.end(),
+                                  [fedid](const HGCalTriggerFedTemplate& fed) {
+                                    return !fed.isWildcard && fed.fedId == fedid;
+                                  });
+
+        if (fedIt == payload.feds.end()) {
+          fedIt = std::find_if(payload.feds.begin(), payload.feds.end(),
+                               [](const HGCalTriggerFedTemplate& fed) {
+                                 return fed.isWildcard;
+                               });
+        }
+
+        if (fedIt == payload.feds.end()) {
+          throw cms::Exception("Configuration")
+              << "Cannot find FED " << fedid
+              << " in HGCalTriggerConfigurationTemplateConditions payload";
+        }
+
+        const auto& fedTemplate = *fedIt;
+        const uint32_t nTDAQ = uint32_t(fedTemplate.neconts.size());
+
+        HGCalTriggerFedConfig fedConfig;
+        fedConfig.econtSwapOffset = fedTemplate.econtSwapOffset;
+        fedConfig.elinksMap = fedTemplate.elinksMap;
+        fedConfig.tdaqs.resize(nTDAQ);
+
+        uint32_t totalECONTsBeforeTDAQ = 0;
+
+        for (std::size_t itdaq = 0; itdaq < nTDAQ; ++itdaq) {
+          HGCalTDAQConfig tdaqConfig;
+          tdaqConfig.tdaqBlockHeaderMarker =
+              std::stoul(fedTemplate.tdaqHeaderMarker, nullptr, 16);
+
+          const uint32_t nECONT = fedTemplate.neconts[itdaq];
+          tdaqConfig.econts.resize(nECONT);
+
+          for (const auto& [typecode, ids] : moduleMap.typecodeMap()) {
+            const auto [fedidFromMap, imod] = ids;
+
+            if ((fedidFromMap != fedid) ||
+                !(totalECONTsBeforeTDAQ <= imod && imod < totalECONTsBeforeTDAQ + nECONT)) {
+              continue;
+            }
+
+            auto modIt = payload.modules.find(typecode);
+
+            if (modIt == payload.modules.end()) {
+              for (auto it = payload.modules.begin(); it != payload.modules.end(); ++it) {
+                const auto& key = it->first;
+                const auto starPos = key.find('*');
+
+                if (starPos == std::string::npos) {
+                  continue;
+                }
+
+                const auto prefix = key.substr(0, starPos);
+                if (typecode.rfind(prefix, 0) == 0) {
+                  modIt = it;
+                  break;
+                }
+              }
+            }
+
+            if (modIt == payload.modules.end()) {
+              throw cms::Exception("Configuration")
+                  << "Cannot find module typecode " << typecode
+                  << " in HGCalTriggerConfigurationTemplateConditions payload";
+            }
+
+            const auto& modTemplate = modIt->second;
+            const bool isSiPM = std::regex_match(typecode, std::regex(R"(T[LH]-.*)"));
+            const uint32_t iecont = imod - totalECONTsBeforeTDAQ;
+
+            if (isSiPM) {
+              if (nECONT != 2 || modTemplate.econts.size() != 2) {
+                throw cms::Exception("Configuration")
+                    << "SiPM module " << typecode
+                    << " requires exactly 2 ECON-T templates and nECONT=2, but got "
+                    << "templates=" << modTemplate.econts.size()
+                    << ", nECONT=" << nECONT;
+              }
+
+              for (uint32_t econtIdx = 0; econtIdx < 2; ++econtIdx) {
+                const auto& et = modTemplate.econts[econtIdx];
+
+                HGCalECONTConfig econtConfig;
+                econtConfig.density = et.density;
+                econtConfig.dropLSB = et.dropLSB;
+                econtConfig.select = et.select;
+                econtConfig.stcType = et.stcType;
+                econtConfig.eportTxNumen = et.eportTxNumen;
+                econtConfig.sumType = et.sumType;
+                econtConfig.calv = et.calv;
+                econtConfig.tcMux = et.mux;
+                econtConfig.offset.resize(et.mux.size());
+
+                for (std::size_t iTC = 0; iTC < et.mux.size(); ++iTC) {
+                  econtConfig.offset[iTC] = calculateCellOffset();
+                }
+
+                tdaqConfig.econts[econtIdx] = econtConfig;
+              }
+            } else {
+              if (modTemplate.econts.empty()) {
+                throw cms::Exception("Configuration")
+                    << "Module typecode " << typecode
+                    << " has no ECON-T template";
+              }
+
+              const auto& et = modTemplate.econts.front();
+
+              HGCalECONTConfig econtConfig;
+              econtConfig.density = et.density;
+              econtConfig.dropLSB = et.dropLSB;
+              econtConfig.select = et.select;
+              econtConfig.stcType = et.stcType;
+              econtConfig.eportTxNumen = et.eportTxNumen;
+              econtConfig.sumType = et.sumType;
+              econtConfig.calv = et.calv;
+              econtConfig.tcMux = et.mux;
+              econtConfig.offset.resize(et.mux.size());
+
+              for (std::size_t iTC = 0; iTC < et.mux.size(); ++iTC) {
+                econtConfig.offset[iTC] = calculateCellOffset();
+              }
+
+              tdaqConfig.econts[iecont] = econtConfig;
+            }
+          }
+
+          fedConfig.tdaqs[itdaq] = tdaqConfig;
+          totalECONTsBeforeTDAQ += fedTemplate.neconts[itdaq];
+        }
+
+        config->feds[fedid] = fedConfig;
       }
-      if (!modfile.is_open()) {
-        throw cms::Exception("Configuration") << "Cannot open module JSON file: " << modjsonurl;
-      }
 
-      fed_config_data = json::parse(fedfile, nullptr, true, true);
-      mod_config_data = json::parse(modfile, nullptr, true, true);
+      LogDebug("HGCalTriggerConfigurationESProducer") << *config;
+      return config;
     }
+
+    const std::string fedjsonurl = fedjson_->fullPath();
+    const std::string modjsonurl = modjson_->fullPath();
+
+    edm::LogInfo("HGCalTriggerConfigurationESProducer")
+        << "produce: fedjson=" << fedjsonurl << ", modjson=" << modjsonurl;
+
+    std::ifstream fedfile(fedjsonurl);
+    std::ifstream modfile(modjsonurl);
+
+    if (!fedfile.is_open()) {
+      throw cms::Exception("Configuration") << "Cannot open FED JSON file: " << fedjsonurl;
+    }
+    if (!modfile.is_open()) {
+      throw cms::Exception("Configuration") << "Cannot open module JSON file: " << modjsonurl;
+    }
+
+    json fed_config_data = json::parse(fedfile, nullptr, true, true);
+    json mod_config_data = json::parse(modfile, nullptr, true, true);
 
     const uint32_t nfeds = moduleMap.numFEDs();
     const std::vector<std::string> fedkeys = {"tdaqHeaderMarker", "neconts", "econtSwapOffset"};
