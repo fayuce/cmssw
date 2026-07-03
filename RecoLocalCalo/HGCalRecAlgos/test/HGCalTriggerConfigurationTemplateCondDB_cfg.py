@@ -7,8 +7,8 @@ options.register("sqliteFile", "hgcal_trigger_template.db", VarParsing.multiplic
 options.register("condTag", "HGCalTriggerConfigurationTemplate_v1", VarParsing.multiplicity.singleton, VarParsing.varType.string, "CondDB tag")
 options.register("record", "HGCalTriggerConfigurationTemplateRcd", VarParsing.multiplicity.singleton, VarParsing.varType.string, "CondDB record")
 options.register("sinceRun", 1, VarParsing.multiplicity.singleton, VarParsing.varType.int, "IOV since run")
-options.register("fedconfig", "Geometry/HGCalMapping/data/TestConfigs/config_trigger_feds_v2.json", VarParsing.multiplicity.singleton, VarParsing.varType.string, "FED trigger configuration JSON")
-options.register("modconfig", "Geometry/HGCalMapping/data/TestConfigs/config_trigger_econts_v2.json", VarParsing.multiplicity.singleton, VarParsing.varType.string, "ECON-T trigger configuration JSON")
+options.register("fedconfig", "Geometry/HGCalMapping/data/TestConfigs/config_trigger_feds_v3.json", VarParsing.multiplicity.singleton, VarParsing.varType.string, "FED trigger configuration JSON")
+options.register("modconfig", "Geometry/HGCalMapping/data/TestConfigs/config_trigger_econts_v3.json", VarParsing.multiplicity.singleton, VarParsing.varType.string, "ECON-T trigger configuration JSON")
 
 options.parseArguments()
 

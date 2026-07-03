@@ -40,7 +40,7 @@ options.register("modconfig",
                  "ECON-D configuration JSON")
 
 options.register("modules",
-                 "Geometry/HGCalMapping/data/ModuleMaps/modulelocator_Sep2024TBv2.txt",
+                 "Geometry/HGCalMapping/data/ModuleMaps/modulelocator_P5v9.txt",
                  VarParsing.multiplicity.singleton,
                  VarParsing.varType.string,
                  "Module locator file")

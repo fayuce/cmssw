@@ -37,7 +37,7 @@ options.register(
 
 options.register(
     "fedconfig",
-    "Geometry/HGCalMapping/data/TestConfigs/config_trigger_feds_v2.json",
+    "Geometry/HGCalMapping/data/TestConfigs/config_trigger_feds_v3.json",
     VarParsing.multiplicity.singleton,
     VarParsing.varType.string,
     "FED trigger configuration JSON"
@@ -45,7 +45,7 @@ options.register(
 
 options.register(
     "modconfig",
-    "Geometry/HGCalMapping/data/TestConfigs/config_trigger_econts_v2.json",
+    "Geometry/HGCalMapping/data/TestConfigs/config_trigger_econts_v3.json",
     VarParsing.multiplicity.singleton,
     VarParsing.varType.string,
     "ECON-T trigger configuration JSON"
@@ -53,7 +53,7 @@ options.register(
 
 options.register(
     "moduleMap",
-    "Geometry/HGCalMapping/data/ModuleMaps/modulelocator_Sep2024TBv2.txt",
+    "Geometry/HGCalMapping/data/ModuleMaps/modulelocator_P5v9.txt",
     VarParsing.multiplicity.singleton,
     VarParsing.varType.string,
     "HGCal module map"

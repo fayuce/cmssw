@@ -17,6 +17,7 @@
         "headerMarker": "0x154",
         "passthrough": 1,
         "Gain": [1, 1, 1, 1, 1, 1, 1, 1],
+	"MultiPlex" : [1, 0, 3, 2, 5, 4, 7, 6],
         "CalibrationSC": [0, 0, 0, 0, 0, 0, 0, 0]
     },
     "MH-T*": {
@@ -30,12 +31,14 @@
         "headerMarker": "0x154",
         "passthrough": 1,
         "Gain": [1, 1, 1, 1],
+	"MultiPlex" : [1, 0, 3, 2],
         "CalibrationSC": [0, 0, 0, 0]
     },
     "MH-R*": {
         "headerMarker": "0x154",
         "passthrough": 1,
         "Gain": [1, 1, 1, 1],
+	"MultiPlex" : [1, 0, 3, 2],
         "CalibrationSC": [0, 0, 0, 0]
     },
     "ML-B*": {
