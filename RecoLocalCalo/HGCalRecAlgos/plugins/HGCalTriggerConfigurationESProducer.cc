@@ -84,7 +84,7 @@ public:
           << ", nModuleTemplates=" << payload.modules.size();
 
       auto config = std::make_unique<HGCalTriggerConfiguration>();
-      config->feds.resize(moduleMap.maxFEDSize());
+      config->feds.resize(1);
 
       for (const auto& tfed : moduleMap.fedReadoutSequences()) {
         if (tfed.readoutTypes_.empty()) {
@@ -227,7 +227,8 @@ public:
           totalECONTsBeforeTDAQ += fedTemplate.neconts[itdaq];
         }
 
-        config->feds[fedid] = fedConfig;
+        config->feds[0] = fedConfig;
+        break;
       }
 
       LogDebug("HGCalTriggerConfigurationESProducer") << *config;
@@ -253,27 +254,35 @@ public:
     json fed_config_data = json::parse(fedfile, nullptr, true, true);
     json mod_config_data = json::parse(modfile, nullptr, true, true);
 
-    const uint32_t nfeds = moduleMap.numFEDs();
     const std::vector<std::string> fedkeys = {"tdaqHeaderMarker", "neconts", "econtSwapOffset"};
     const std::vector<std::string> modkeys = {
         "density", "dropLSB", "select", "stc_type", "eporttx_numen", "use_sum", "calv", "mux"};
 
-    if (nfeds != fed_config_data.size()) {
-      edm::LogWarning("HGCalTriggerConfigurationESProducer")
-          << "Total number of FEDs found in JSON file " << fedjsonurl << " (" << fed_config_data.size()
-          << ") does not match indexer (" << nfeds << ")";
-    }
+    // Trigger configuration is not split by S-link.
+    // Pedro's update: trigger uses one physical FED only.
+    static constexpr uint32_t kTriggerPhysicalFedId = 2101;
+    static constexpr std::size_t kTriggerDenseFedIndex = 0;
 
     auto config = std::make_unique<HGCalTriggerConfiguration>();
-    config->feds.resize(moduleMap.maxFEDSize());
+    config->feds.resize(1);
 
+    std::optional<uint32_t> mappingFedId;
     for (const auto& tfed : moduleMap.fedReadoutSequences()) {
-      if (tfed.readoutTypes_.empty()) {
-        continue;
+      if (!tfed.readoutTypes_.empty()) {
+        mappingFedId = tfed.id;
+        break;
       }
+    }
 
-      const auto fedid = tfed.id;
-      const auto fedkey = hgcal::search_fedkey(fedid, fed_config_data, fedjsonurl);
+    if (!mappingFedId) {
+      throw cms::Exception("Configuration")
+          << "No non-empty trigger FED readout sequence found in HGCal trigger module map";
+    }
+
+    // Use the first non-empty mapping FED only to index modules.
+    // The physical trigger FED used for the JSON lookup is fixed to 2101.
+    const auto fedid = *mappingFedId;
+    const auto fedkey = hgcal::search_fedkey(kTriggerPhysicalFedId, fed_config_data, fedjsonurl);
       hgcal::check_keys(fed_config_data, fedkey, fedkeys, fedjsonurl);
 
       const uint32_t nTDAQ = uint32_t(fed_config_data[fedkey]["neconts"].size());
@@ -396,8 +405,7 @@ public:
         totalECONTsBeforeTDAQ += uint32_t(fed_config_data[fedkey]["neconts"][itdaq]);
       }
 
-      config->feds[fedid] = fedConfig;
-    }
+      config->feds[kTriggerDenseFedIndex] = fedConfig;
 
     LogDebug("HGCalTriggerConfigurationESProducer") << *config;
     return config;
